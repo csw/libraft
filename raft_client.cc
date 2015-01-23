@@ -33,7 +33,11 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Allocated cmd buffer at %p.\n", buf);
         snprintf(buf, BUFSIZE, "Raft command #%d", i);
         // ignore return value
-        raft_apply(buf, BUFSIZE, 0);
+        void *result = nullptr;
+        RaftError err = raft_apply(&result, buf, BUFSIZE, 0);
+        if (err) {
+            fprintf(stderr, "Raft error: %s\n", raft_err_msg(err));
+        }
         raft::shm.deallocate(buf);
         sleep(1);
     }

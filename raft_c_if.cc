@@ -2,6 +2,7 @@
 #include <sys/types.h>
 
 #include <thread>
+#include <vector>
 
 #include "raft_c_if.h"
 #include "raft_shm.h"
@@ -9,21 +10,34 @@
 using boost::interprocess::anonymous_instance;
 using boost::interprocess::interprocess_mutex;
 
-void start_fsm_worker(RaftFSM* fsm);
-void run_fsm_worker(RaftFSM* fsm);
+static void start_fsm_worker(RaftFSM* fsm);
+static void run_fsm_worker(RaftFSM* fsm);
 
-void dispatch_fsm_apply(raft::CallSlot<raft::FSMOp>& slot, raft::LogEntry& log);
-void dispatch_fsm_apply_cmd(raft::CallSlot<raft::FSMOp>& slot, raft::LogEntry& log);
+static void dispatch_fsm_apply(raft::FSMCallSlot& slot, raft::LogEntry& log);
+static void dispatch_fsm_apply_cmd(raft::FSMCallSlot& slot, raft::LogEntry& log);
+
+static void init_err_msgs();
 
 static RaftFSM*    fsm;
 static std::thread fsm_worker;
+
+static std::vector<const char*> err_msgs;
+
+const char* raft_err_msg(RaftError err)
+{
+    if (err < err_msgs.size()) {
+        return err_msgs.at(err);
+    } else {
+        return "Unknown error";
+    }
+}
 
 bool raft_is_leader()
 {
     return raft::scoreboard->is_leader;
 }
 
-void* raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns)
+RaftError raft_apply(void **res, char* cmd, size_t cmd_len, uint64_t timeout_ns)
 {
     raft::SlotHandle<raft::APICall> sh(raft::scoreboard->grab_slot(),
                                        std::adopt_lock);
@@ -45,17 +59,31 @@ void* raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns)
     slot.call_ready = true;
     slot.call_cond.notify_one();
     slot.ret_cond.wait(l, [&] () { return slot.ret_ready; });
-    assert(slot.state == raft::CallState::Success
-           || slot.state == raft::CallState::Error);
+
+    if (slot.state == raft::CallState::Success) {
+        assert(slot.error == RAFT_SUCCESS);
+        if (res)
+            *res = (void*) slot.retval;
+
+    } else if (slot.state == raft::CallState::Error) {
+        assert(slot.error != RAFT_SUCCESS);
+        if (res)
+            *res = nullptr;
+
+    } else {
+        fprintf(stderr, "Unexpected call state %d!\n", slot.state);
+        abort();
+    }
 
     slot.ret_ready = false;
     raft::shm.destroy_ptr(&call);
 
-    return (void*) slot.retval;
+    return slot.error;
 }
 
 pid_t raft_init(RaftFSM *fsm_)
 {
+    init_err_msgs();
     raft::shm_init("raft", true);
     fsm = fsm_;
     pid_t raft_pid = raft::run_raft();
@@ -76,7 +104,7 @@ void start_fsm_worker(RaftFSM* fsm)
 void run_fsm_worker(RaftFSM* fsm)
 {
     fprintf(stderr, "FSM worker starting.\n");
-    raft::CallSlot<raft::FSMOp>& slot = raft::scoreboard->fsm_slot;
+    raft::FSMCallSlot& slot = raft::scoreboard->fsm_slot;
 
     for (;;) {
         // refactor, combine this with the Go side...
@@ -146,4 +174,23 @@ void* alloc_raft_buffer(size_t len)
 void free_raft_buffer(void* buf)
 {
     raft::shm.deallocate(buf);
+}
+
+void init_err_msgs()
+{
+    // TODO: dump these from the Raft code
+    err_msgs = decltype(err_msgs)(N_RAFT_ERRORS);
+    err_msgs[RAFT_SUCCESS] = "success";
+    err_msgs[RAFT_E_LEADER] = "node is the leader";
+    err_msgs[RAFT_E_NOT_LEADER] = "node is not the leader";
+    err_msgs[RAFT_E_LEADERSHIP_LOST] = "leadership lost while committing log";
+    err_msgs[RAFT_E_SHUTDOWN] = "raft is already shutdown";
+    err_msgs[RAFT_E_ENQUEUE_TIMEOUT] = "timed out enqueuing operation";
+    err_msgs[RAFT_E_KNOWN_PEER] = "peer already known";
+    err_msgs[RAFT_E_UNKNOWN_PEER] = "peer is unknown";
+    err_msgs[RAFT_E_LOG_NOT_FOUND] = "log not found";
+    err_msgs[RAFT_E_PIPELINE_REPLICATION_NOT_SUPP] = "pipeline replication not supported";
+    err_msgs[RAFT_E_TRANSPORT_SHUTDOWN] = "transport shutdown";
+    err_msgs[RAFT_E_PIPELINE_SHUTDOWN] = "append pipeline closed";
+    err_msgs[RAFT_E_OTHER] = "undetermined error";
 }

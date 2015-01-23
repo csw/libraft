@@ -12,11 +12,13 @@ extern "C" {
     void* alloc_raft_buffer(size_t len);
     void free_raft_buffer(void* buf);
 
+    const char* raft_err_msg(RaftError err);
+
     // top half; client side
     bool raft_is_leader();
 
     // blocking
-    void* raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns);
+    RaftError raft_apply(void **res, char* cmd, size_t cmd_len, uint64_t timeout_ns);
 
     // bottom half; FSM side
 

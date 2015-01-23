@@ -55,6 +55,8 @@ public:
     CallState               state;
     shm_handle              handle;
     uintptr_t               retval;
+    RaftError               error;
+
     interprocess_mutex      owned;
     bool                    call_ready;
     interprocess_condition  call_cond;
@@ -119,9 +121,6 @@ struct ApplyCall {
     size_t     cmd_len;
     uint64_t   timeout_ns;
     uint64_t   dispatch_ns;
-    uintptr_t  response;
-    char       errmsg[64];
-    uint32_t   errlen;
 };
 
 struct LogEntry {
