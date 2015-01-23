@@ -44,7 +44,7 @@ void Scoreboard::wait_for_raft(pid_t raft_pid)
     }
 }
 
-CallSlot& Scoreboard::grab_slot()
+RaftCallSlot& Scoreboard::grab_slot()
 {
     for (;;) {
         for (int i = 0; i < 16; ++i) {
@@ -56,17 +56,30 @@ CallSlot& Scoreboard::grab_slot()
     }
 }
 
-SlotHandle::SlotHandle(Scoreboard& sb)
-    : slot(sb.grab_slot()),
+template <typename CT>
+SlotHandle<CT>::SlotHandle(CallSlot<CT>& slot_)
+    : slot(slot_),
+      slot_lock(slot.slot_busy)
+{
+    ++slot.refcount;
+}
+
+template <typename CT>
+SlotHandle<CT>::SlotHandle(CallSlot<CT>& slot_, std::adopt_lock_t _t)
+    : slot(slot_),
       slot_lock(slot.slot_busy, std::adopt_lock)
 {
     ++slot.refcount;
 }
 
-SlotHandle::~SlotHandle()
+template <typename CT>
+SlotHandle<CT>::~SlotHandle()
 {
     --slot.refcount;
 }
+
+template class SlotHandle<APICall>;
+template class SlotHandle<FSMOp>;
 
 void shm_init(const char* name, bool create)
 {

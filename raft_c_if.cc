@@ -16,9 +16,10 @@ bool raft_is_leader()
 
 void* raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns)
 {
-    raft::SlotHandle sh(*raft::scoreboard);
+    raft::SlotHandle<raft::APICall> sh(raft::scoreboard->grab_slot(),
+                                       std::adopt_lock);
     std::unique_lock<interprocess_mutex> l(sh.slot.owned);
-    sh.slot.call_type = raft::CallType::Apply;
+    sh.slot.call_type = raft::APICall::Apply;
     sh.slot.state = raft::CallState::Pending;
 
     // manual memory management for now...

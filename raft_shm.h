@@ -23,7 +23,11 @@ using shm_handle = managed_shared_memory::handle_t;
 
 const static size_t SHM_SIZE = 64 * 1024 * 1024;
 
-enum class CallType {
+enum class APICall {
+    Apply
+};
+
+enum class FSMOp {
     Apply
 };
 
@@ -31,6 +35,9 @@ enum class CallState {
     Pending, Dispatched, Success, Error
 };
 
+template<typename CT> class SlotHandle;
+
+template<typename CT>
 class CallSlot
 {
 public:
@@ -39,13 +46,12 @@ public:
     CallSlot(CallSlot&) = delete;
     CallSlot& operator=(CallSlot&) = delete;
 
-    void reset();
-
-    CallType                call_type;
+    CT                      call_type;
     // atomic?
     uint32_t                refcount;
     CallState               state;
     shm_handle              handle;
+    uint64_t                retval;
     interprocess_mutex      owned;
     bool                    call_ready;
     interprocess_condition  call_cond;
@@ -53,9 +59,11 @@ public:
     interprocess_condition  ret_cond;
 private:
     interprocess_mutex      slot_busy;
-    friend class SlotHandle;
+    friend class SlotHandle<CT>;
     friend class Scoreboard;
 };
+using RaftCallSlot = CallSlot<APICall>;
+using FSMCallSlot = CallSlot<FSMOp>;
 
 class Scoreboard
 {
@@ -66,27 +74,28 @@ public:
 
     std::atomic<bool> is_raft_running;
     std::atomic<bool> is_leader;
-    CallSlot slots[16];
+    RaftCallSlot slots[16];
+    FSMCallSlot  fsm_slot;
 
     Scoreboard(Scoreboard&) = delete;
     Scoreboard& operator=(Scoreboard&) = delete;
-private:
-    friend class SlotHandle;
-    CallSlot& grab_slot();
+    RaftCallSlot& grab_slot();
 };
 
 extern Scoreboard* scoreboard;
 
+template<typename CT>
 class SlotHandle
 {
 public:
-    SlotHandle(Scoreboard&);
+    SlotHandle(CallSlot<CT>& slot);
+    SlotHandle(CallSlot<CT>& slot, std::adopt_lock_t _t);
     ~SlotHandle();
 
     SlotHandle(SlotHandle&) = delete;
     SlotHandle& operator=(SlotHandle&) = delete;
 
-    CallSlot& slot;
+    CallSlot<CT>& slot;
 
 private:
     std::unique_lock<interprocess_mutex> slot_lock;
