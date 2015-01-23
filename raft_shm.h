@@ -13,6 +13,8 @@
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 
+#include "raft_defs.h"
+
 namespace raft {
 
 using boost::interprocess::managed_shared_memory;
@@ -20,6 +22,7 @@ using boost::interprocess::interprocess_mutex;
 using boost::interprocess::interprocess_condition;
 
 using shm_handle = managed_shared_memory::handle_t;
+using mutex_lock = std::unique_lock<boost::interprocess::interprocess_mutex>;
 
 const static size_t SHM_SIZE = 64 * 1024 * 1024;
 
@@ -51,7 +54,7 @@ public:
     uint32_t                refcount;
     CallState               state;
     shm_handle              handle;
-    uint64_t                retval;
+    uintptr_t               retval;
     interprocess_mutex      owned;
     bool                    call_ready;
     interprocess_condition  call_cond;
@@ -103,6 +106,8 @@ private:
 
 extern managed_shared_memory shm;
 
+bool in_shm_bounds(void* ptr);
+
 void shm_init(const char* name, bool create);
 
 pid_t run_raft();
@@ -117,6 +122,14 @@ struct ApplyCall {
     uintptr_t  response;
     char       errmsg[64];
     uint32_t   errlen;
+};
+
+struct LogEntry {
+    uint64_t      index;
+    uint64_t      term;
+    raft_log_type log_type;
+    shm_handle    data_buf;
+    size_t        data_len;
 };
 
 }

@@ -81,6 +81,13 @@ SlotHandle<CT>::~SlotHandle()
 template class SlotHandle<APICall>;
 template class SlotHandle<FSMOp>;
 
+bool in_shm_bounds(void* ptr)
+{
+    char* base = (char*) shm.get_address();
+    char* cptr = (char*) ptr;
+    return (cptr >= base) && (cptr < base + shm.get_size());
+}
+
 void shm_init(const char* name, bool create)
 {
     // [create]

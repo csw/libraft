@@ -6,6 +6,8 @@ GO_DIR  = $(GOPATH)/src/$(GO_LIB)
 
 PATH := $(PATH):$(GO_BIN)
 
+export GOPATH PATH
+
 CXXFLAGS += -std=c++11 -stdlib=libc++
 CXXFLAGS += -Wall -Werror -pedantic
 CXXFLAGS += -g -MMD

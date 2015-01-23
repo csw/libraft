@@ -10,6 +10,8 @@ const static uint32_t BUFSIZE = 256;
 
 void* FSMApply(uint64_t index, uint64_t term, RaftLogType type, void *data, size_t len)
 {
+    printf("FSM: applying command (%lu bytes @ %p): %s\n",
+           len, data, (char*)data);
     return nullptr;
 }
 
