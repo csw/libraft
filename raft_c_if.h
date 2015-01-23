@@ -32,7 +32,7 @@ extern "C" {
         // TODO: restore
     } RaftFSM;
 
-    void raft_init(RaftFSM *fsm);
+    pid_t raft_init(RaftFSM *fsm);
 
 #ifdef __cplusplus
 }

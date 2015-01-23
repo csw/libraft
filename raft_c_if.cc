@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <sys/types.h>
+
 #include <thread>
 
 #include "raft_c_if.h"
@@ -40,6 +41,17 @@ void* raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns)
 
     raft::shm.destroy_ptr(&call);
     return nullptr;
+}
+
+pid_t raft_init(RaftFSM *fsm)
+{
+    (void) fsm;
+    raft::shm_init("raft", true);
+    pid_t raft_pid = raft::run_raft();
+    fprintf(stderr, "Started Raft process: pid %d.\n", raft_pid);
+    raft::scoreboard->wait_for_raft(raft_pid);
+    fprintf(stderr, "Raft is running.\n");
+    return raft_pid;
 }
 
 void* alloc_raft_buffer(size_t len)

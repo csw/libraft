@@ -8,10 +8,18 @@
 
 const static uint32_t BUFSIZE = 256;
 
+void* FSMApply(uint64_t index, uint64_t term, RaftLogType type, void *data, size_t len)
+{
+    return nullptr;
+}
+
+RaftFSM fsm_def = { &FSMApply };
+
 int main(int argc, char *argv[])
 {
     fprintf(stderr, "C client starting.\n");
-    raft::init("raft", true);
+    
+    raft_init(&fsm_def);
 
     while (! raft_is_leader()) {
         sleep(1);

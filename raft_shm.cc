@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <unistd.h>
+#include <sys/wait.h>
 
 #include "raft_shm.h"
 
@@ -13,6 +14,35 @@ Scoreboard* scoreboard;
 Scoreboard::Scoreboard()
     : is_leader(false)
 {}
+
+void Scoreboard::wait_for_raft(pid_t raft_pid)
+{
+    while (! is_raft_running) {
+        int raft_stat;
+        int rc = waitpid(raft_pid, &raft_stat, WNOHANG);
+        if (rc == 0) {
+            // nothing to report
+            usleep(100000); // 100 ms
+        } else if (rc > 0) {
+            // Raft process is terminated or stopped
+            if (WIFEXITED(raft_stat)) {
+                fprintf(stderr, "Raft process exited with status %d.\n",
+                        WEXITSTATUS(raft_stat));
+            } else if (WIFSIGNALED(raft_stat)) {
+                fprintf(stderr, "Raft process terminated by signal %d.\n",
+                        WTERMSIG(raft_stat));
+            } else if (WIFSTOPPED(raft_stat)) {
+                fprintf(stderr, "Raft process stopped by signal %d.\n",
+                        WSTOPSIG(raft_stat));
+            }
+            abort();
+        } else {
+            perror("waitpid error");
+            abort();
+        }
+
+    }
+}
 
 CallSlot& Scoreboard::grab_slot()
 {
@@ -38,7 +68,7 @@ SlotHandle::~SlotHandle()
     --slot.refcount;
 }
 
-void init(const char* name, bool create)
+void shm_init(const char* name, bool create)
 {
     // [create]
     // register on-exit callback to call remove()
@@ -63,6 +93,26 @@ void init(const char* name, bool create)
     }
     fprintf(stderr, "[%d]: Mapped shared memory at base address %p.\n",
             getpid(), raft::shm.get_address());
+}
+
+pid_t run_raft()
+{
+    pid_t kidpid = fork();
+    if (kidpid == -1) {
+        perror("Cannot fork");
+        exit(1);
+    } else if (kidpid) {
+        // parent
+        return kidpid;
+    } else {
+        // child
+        
+        int rc = execlp("raft_if", "raft_if", "-single", nullptr);
+        if (rc) {
+            perror("Exec failed");
+        }
+        exit(1);
+    }
 }
 
 }

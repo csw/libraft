@@ -2,10 +2,12 @@
 #ifndef RAFT_SHM_H
 #define RAFT_SHM_H
 
+#include <sys/types.h>
+#include <unistd.h>
+
 #include <atomic>
 #include <thread>
 #include <vector>
-#include <sys/types.h>
 
 #include <boost/interprocess/managed_shared_memory.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
@@ -59,6 +61,10 @@ class Scoreboard
 {
 public:
     Scoreboard();
+
+    void wait_for_raft(pid_t raft_pid);
+
+    std::atomic<bool> is_raft_running;
     std::atomic<bool> is_leader;
     CallSlot slots[16];
 
@@ -88,7 +94,9 @@ private:
 
 extern managed_shared_memory shm;
 
-void init(const char* name, bool create);
+void shm_init(const char* name, bool create);
+
+pid_t run_raft();
 
 // call structs
 
