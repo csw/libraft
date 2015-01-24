@@ -23,7 +23,6 @@ make_dir := $(dir $(makefile_path))
 all: libraft.a raft_client $(GO_PROG)
 
 run_client: raft_client $(GO_PROG)
-	rm /tmp/boost_interprocess/raft
 	./raft_client
 
 $(GO_PROG): $(GO_DIR)/raft_if.go $(GO_DIR)/raft_go_if.h $(GO_DIR)/raft_go_if.cc \
