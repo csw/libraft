@@ -21,7 +21,6 @@ static void dispatch_fsm_apply(raft::FSMCallSlot& slot, raft::LogEntry& log);
 static void dispatch_fsm_apply_cmd(raft::FSMCallSlot& slot, raft::LogEntry& log);
 
 static void init_err_msgs();
-
 static RaftFSM*    fsm;
 static std::thread fsm_worker;
 
@@ -81,8 +80,10 @@ RaftError raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns, void **res)
 
     if (slot.state == raft::CallState::Success) {
         assert(slot.error == RAFT_SUCCESS);
+        void* ret_ptr = (void*) slot.retval;
+        fprintf(stderr, "Apply return value @ %p\n", ret_ptr);
         if (res)
-            *res = (void*) slot.retval;
+            *res = ret_ptr;
 
     } else if (slot.state == raft::CallState::Error) {
         assert(slot.error != RAFT_SUCCESS);
@@ -161,11 +162,12 @@ void dispatch_fsm_apply(raft::CallSlot<raft::FSMOp>& slot, raft::LogEntry& log)
 void dispatch_fsm_apply_cmd(raft::CallSlot<raft::FSMOp>& slot, raft::LogEntry& log)
 {
     assert(log.data_buf);
-    void* data_buf = raft::shm.get_address_from_handle(log.data_buf);
+    char* data_buf = (char*) raft::shm.get_address_from_handle(log.data_buf);
     fprintf(stderr, "Found command buffer at %p.\n", data_buf);
     slot.state = raft::CallState::Dispatched;
     void* response =
         fsm->apply(log.index, log.term, log.log_type, data_buf, log.data_len);
+    fprintf(stderr, "FSM response @ %p\n", response);
     slot.retval = (uintptr_t) response;
 }
 

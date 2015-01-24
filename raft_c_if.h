@@ -30,7 +30,7 @@ extern "C" {
 
 typedef struct raft_fsm {
     void* (*apply)(uint64_t index, uint64_t term, RaftLogType type,
-                   void *data, size_t len);
+                   char *cmd, size_t len);
     // TODO: snapshot
     // TODO: restore
 } RaftFSM;

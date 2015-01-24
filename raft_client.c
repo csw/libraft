@@ -1,3 +1,5 @@
+#include <assert.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -5,20 +7,43 @@
 
 #include "raft_c_if.h"
 
+typedef uint32_t* fsm_result_t;
+
 const static uint32_t BUFSIZE = 256;
 
-void* FSMApply(uint64_t index, uint64_t term, RaftLogType type, void *data, size_t len)
+static uint32_t letter_count = 0;
+
+fsm_result_t update_count(const char *buf, size_t len)
+{
+    const char * const endp = buf+len;
+    while (buf < endp) {
+        char c = *buf++;
+        if (isalpha(*buf++)) {
+            ++letter_count;
+        } else if (c == '\0') {
+            break;
+        }
+    }
+
+    uint32_t *result = malloc(sizeof(uint32_t)); // yeah, yeah, it's 4
+    assert(result);
+    fprintf(stderr, "Allocated result object @ %p\n", result);
+    *result = letter_count;
+    return result;
+}
+
+void* FSMApply(uint64_t index, uint64_t term, RaftLogType type, char *cmd, size_t len)
 {
     printf("FSM: applying command (%lu bytes @ %p): %s\n",
-           len, data, (char*)data);
-    return NULL;
+           len, cmd, cmd);
+    return update_count(cmd, len);
 }
 
 RaftFSM fsm_def = { &FSMApply };
 
 int main(int argc, char *argv[])
 {
-    fprintf(stderr, "C client starting.\n");
+    fprintf(stderr, "Raft client starting.\n");
 
     int runs = 20;
 
@@ -37,9 +62,13 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Allocated cmd buffer at %p.\n", buf);
         snprintf(buf, BUFSIZE, "Raft command #%d", i);
         // ignore return value
-        void *result = NULL;
-        RaftError err = raft_apply(buf, BUFSIZE, 0, &result);
-        if (err) {
+        fsm_result_t cur_count_p = NULL;
+        RaftError err = raft_apply(buf, BUFSIZE, 0, (void**)&cur_count_p);
+        if (!err) {
+            assert(cur_count_p);
+            printf("FSM state: letter count %u.\n", *cur_count_p);
+            free(cur_count_p);
+        } else {
             fprintf(stderr, "Raft error: %s\n", raft_err_msg(err));
         }
         free_raft_buffer(buf);
