@@ -42,7 +42,7 @@ pid_t raft_init(RaftFSM *fsm_)
     raft::shm_init("raft", true);
 
     fsm = fsm_;
-    pid_t raft_pid = raft::run_raft();
+    raft::run_raft();
     fprintf(stderr, "Started Raft process: pid %d.\n", raft_pid);
     raft::scoreboard->wait_for_raft(raft_pid);
     fprintf(stderr, "Raft is running.\n");

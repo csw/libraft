@@ -8,8 +8,18 @@ namespace raft {
 
 using boost::interprocess::unique_instance;
 
+namespace {
+
+std::thread raft_watcher;
+
+void watch_raft_proc(pid_t raft_pid);
+void report_process_status(const char *desc, pid_t pid, int status);
+
+}
+
+pid_t               raft_pid;
 managed_mapped_file shm;
-Scoreboard* scoreboard;
+Scoreboard*         scoreboard;
 
 Scoreboard::Scoreboard()
     : is_leader(false)
@@ -18,29 +28,8 @@ Scoreboard::Scoreboard()
 void Scoreboard::wait_for_raft(pid_t raft_pid)
 {
     while (! is_raft_running) {
-        int raft_stat;
-        int rc = waitpid(raft_pid, &raft_stat, WNOHANG);
-        if (rc == 0) {
-            // nothing to report
-            usleep(100000); // 100 ms
-        } else if (rc > 0) {
-            // Raft process is terminated or stopped
-            if (WIFEXITED(raft_stat)) {
-                fprintf(stderr, "Raft process exited with status %d.\n",
-                        WEXITSTATUS(raft_stat));
-            } else if (WIFSIGNALED(raft_stat)) {
-                fprintf(stderr, "Raft process terminated by signal %d.\n",
-                        WTERMSIG(raft_stat));
-            } else if (WIFSTOPPED(raft_stat)) {
-                fprintf(stderr, "Raft process stopped by signal %d.\n",
-                        WSTOPSIG(raft_stat));
-            }
-            abort();
-        } else {
-            perror("waitpid error");
-            abort();
-        }
-
+        // if the process exits, the raft_watcher thread will catch it
+        usleep(100000); // 100 ms
     }
 }
 
@@ -92,6 +81,7 @@ void shm_init(const char* name, bool create)
 {
     // register on-exit callback to call remove()?
     if (create) {
+        // client side
         struct stat shm_stat;
         if (stat(SHM_PATH, &shm_stat) == 0) {
             if (unlink(SHM_PATH) == -1) {
@@ -108,10 +98,13 @@ void shm_init(const char* name, bool create)
         fprintf(stderr, "[%d]: Initialized shared memory and scoreboard.\n",
                 getpid());
     } else {
+        // Raft side
         shm = managed_mapped_file(boost::interprocess::open_only,
                                   SHM_PATH);
         fprintf(stderr, "[%d]: Opened shared memory.\n",
                 getpid());
+        // unlink the file after we've mapped it, nobody else will need it
+        // XXX: add option to leave it for debugging?
         if (unlink(SHM_PATH) == -1) {
             perror("Failed to unlink shared memory file");
             exit(1);
@@ -135,6 +128,10 @@ pid_t run_raft()
         exit(1);
     } else if (kidpid) {
         // parent
+        raft_pid = kidpid;
+        // start the watcher thread
+        assert(raft_watcher.get_id() == std::thread::id());
+        raft_watcher = std::thread(watch_raft_proc, raft_pid);
         return kidpid;
     } else {
         // child
@@ -145,6 +142,48 @@ pid_t run_raft()
         }
         exit(1);
     }
+}
+
+namespace {
+
+void watch_raft_proc(pid_t raft_pid)
+{
+    for (;;) {
+        int status;
+        pid_t pid = waitpid(raft_pid, &status, 0);
+        assert(pid != 0);
+        if (pid > 0) {
+            if (WIFSTOPPED(status)) {
+                // attached a debugger or something...
+                continue;
+            } else {
+                report_process_status("Raft process", raft_pid, status);
+                // TODO: bubble this back up to the client? recover?
+                exit(1);
+            }
+        } else {
+            perror("waitpid failed");
+            exit(1);
+        }
+    }
+}
+
+void report_process_status(const char *desc, pid_t pid, int status)
+{
+    if (WIFEXITED(status)) {
+        fprintf(stderr, "%s (pid %d) exited with status %d.\n",
+                desc, pid, WEXITSTATUS(status));
+    } else if (WIFSIGNALED(status)) {
+        fprintf(stderr, "%s (pid %d) terminated by signal %d.\n",
+                desc, pid, WTERMSIG(status));
+    } else if (WIFSTOPPED(status)) {
+        fprintf(stderr, "%s (pid %d) stopped by signal %d.\n",
+                desc, pid, WSTOPSIG(status));
+    } else {
+        assert(false && "impossible process status!");
+    }
+}
+
 }
 
 Timings::Timings(time_point t)

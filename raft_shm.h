@@ -32,11 +32,13 @@ using mutex_lock = std::unique_lock<boost::interprocess::interprocess_mutex>;
 
 class Scoreboard;
 
+// TODO: add knobs for these
 const static char SHM_PATH[] = "/tmp/raft_shm";
 const static size_t SHM_SIZE = 64 * 1024 * 1024;
 
+extern pid_t               raft_pid;
 extern managed_mapped_file shm;
-extern Scoreboard* scoreboard;
+extern Scoreboard*         scoreboard;
 
 template <typename T>
 using pool_allocator =
@@ -174,8 +176,20 @@ private:
 
 bool in_shm_bounds(void* ptr);
 
+/**
+ * Set up shared memory and any resident resources.
+ *
+ * @param name currently ignored...
+ * @param create whether to create a new shared memory region (for the client) 
+ *               or map an existing one (for the Raft side).
+ */
 void shm_init(const char* name, bool create);
 
+/**
+ * Start the Raft process.
+ *
+ * To be called from the client after shm_init().
+ */
 pid_t run_raft();
 
 template <typename T>
