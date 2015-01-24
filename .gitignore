@@ -3,3 +3,4 @@
 *.d
 /raft_client
 /perf/
+*.dSYM

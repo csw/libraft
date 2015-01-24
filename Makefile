@@ -36,6 +36,7 @@ libraft.a: libraft.a(raft_shm.o) libraft.a(raft_c_if.o)
 
 raft_client: raft_client.o raft_shm.o raft_c_if.o
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
+	dsymutil $@
 
 clean:
 	-rm -f *.o *.d *.a
