@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <sys/types.h>
 
+#include <chrono>
 #include <thread>
 #include <vector>
 
@@ -39,6 +40,7 @@ bool raft_is_leader()
 
 RaftError raft_apply(void **res, char* cmd, size_t cmd_len, uint64_t timeout_ns)
 {
+    auto start_t = std::chrono::high_resolution_clock::now();
     raft::SlotHandle<raft::APICall> sh(raft::scoreboard->grab_slot(),
                                        std::adopt_lock);
     raft::RaftCallSlot& slot = sh.slot;
@@ -78,6 +80,9 @@ RaftError raft_apply(void **res, char* cmd, size_t cmd_len, uint64_t timeout_ns)
     slot.ret_ready = false;
     raft::shm.destroy_ptr(&call);
 
+    auto end_t = std::chrono::high_resolution_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end_t - start_t);
+    fprintf(stderr, "Apply call completed in %lld us.\n", elapsed.count());
     return slot.error;
 }
 
