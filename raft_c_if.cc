@@ -2,6 +2,7 @@
 #include <sys/types.h>
 
 #include <chrono>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -10,6 +11,8 @@
 
 using boost::interprocess::anonymous_instance;
 using boost::interprocess::interprocess_mutex;
+
+using namespace raft;
 
 static void start_fsm_worker(RaftFSM* fsm);
 static void run_fsm_worker(RaftFSM* fsm);
@@ -33,6 +36,20 @@ const char* raft_err_msg(RaftError err)
     }
 }
 
+pid_t raft_init(RaftFSM *fsm_)
+{
+    init_err_msgs();
+    raft::shm_init("raft", true);
+
+    fsm = fsm_;
+    pid_t raft_pid = raft::run_raft();
+    fprintf(stderr, "Started Raft process: pid %d.\n", raft_pid);
+    raft::scoreboard->wait_for_raft(raft_pid);
+    fprintf(stderr, "Raft is running.\n");
+    start_fsm_worker(fsm);
+    return raft_pid;
+}
+
 bool raft_is_leader()
 {
     return raft::scoreboard->is_leader;
@@ -40,27 +57,27 @@ bool raft_is_leader()
 
 RaftError raft_apply(void **res, char* cmd, size_t cmd_len, uint64_t timeout_ns)
 {
-    auto start_t = std::chrono::high_resolution_clock::now();
+    auto start_t = Timings::clock::now();
     raft::SlotHandle<raft::APICall> sh(raft::scoreboard->grab_slot(),
                                        std::adopt_lock);
     raft::RaftCallSlot& slot = sh.slot;
+    slot.timings = Timings(start_t);
     std::unique_lock<interprocess_mutex> l(slot.owned);
+    slot.timings.record("slot owned");
     slot.call_type = raft::APICall::Apply;
     slot.state = raft::CallState::Pending;
 
-    // manual memory management for now...
-    raft::ApplyCall& call =
-        *raft::shm.construct<raft::ApplyCall>(anonymous_instance)();
-    fprintf(stderr, "Allocated call buffer at %p.\n", &call);
-
+    ApplyCall& call = slot.call.apply;
     call.cmd_buf = raft::shm.get_handle_from_address(cmd);
     call.cmd_len = cmd_len;
     call.timeout_ns = timeout_ns;
+    call.dispatch_ns = 0;
 
-    slot.handle = raft::shm.get_handle_from_address(&call);
     slot.call_ready = true;
     slot.call_cond.notify_one();
+    slot.timings.record("call issued");
     slot.ret_cond.wait(l, [&] () { return slot.ret_ready; });
+    slot.timings.record("call returned");
 
     if (slot.state == raft::CallState::Success) {
         assert(slot.error == RAFT_SUCCESS);
@@ -78,25 +95,10 @@ RaftError raft_apply(void **res, char* cmd, size_t cmd_len, uint64_t timeout_ns)
     }
 
     slot.ret_ready = false;
-    raft::shm.destroy_ptr(&call);
+    slot.timings.record("call completed");
+    slot.timings.print();
 
-    auto end_t = std::chrono::high_resolution_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end_t - start_t);
-    fprintf(stderr, "Apply call completed in %lld us.\n", elapsed.count());
     return slot.error;
-}
-
-pid_t raft_init(RaftFSM *fsm_)
-{
-    init_err_msgs();
-    raft::shm_init("raft", true);
-    fsm = fsm_;
-    pid_t raft_pid = raft::run_raft();
-    fprintf(stderr, "Started Raft process: pid %d.\n", raft_pid);
-    raft::scoreboard->wait_for_raft(raft_pid);
-    fprintf(stderr, "Raft is running.\n");
-    start_fsm_worker(fsm);
-    return raft_pid;
 }
 
 void start_fsm_worker(RaftFSM* fsm)
@@ -117,13 +119,9 @@ void run_fsm_worker(RaftFSM* fsm)
         slot.call_cond.wait(l, [&] () { return slot.call_ready; });
         assert(slot.state == raft::CallState::Pending);
 
-        assert(slot.handle);
-        void* call_addr = raft::shm.get_address_from_handle(slot.handle);
-        fprintf(stderr, "Found FSM op buffer at %p.\n", call_addr);
-
         switch (slot.call_type) {
         case raft::FSMOp::Apply:
-            dispatch_fsm_apply(slot, *(raft::LogEntry*)call_addr);
+            dispatch_fsm_apply(slot, slot.call.log_entry);
             break;
         default:
             fprintf(stderr, "Unhandled log entry type: %d\n",

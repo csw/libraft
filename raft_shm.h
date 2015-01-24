@@ -2,14 +2,18 @@
 #ifndef RAFT_SHM_H
 #define RAFT_SHM_H
 
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <atomic>
+#include <chrono>
 #include <thread>
 #include <vector>
 
-#include <boost/interprocess/managed_shared_memory.hpp>
+#include <boost/interprocess/managed_mapped_file.hpp>
+#include <boost/interprocess/smart_ptr/unique_ptr.hpp>
+#include <boost/interprocess/allocators/private_node_allocator.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 
@@ -17,14 +21,32 @@
 
 namespace raft {
 
-using boost::interprocess::managed_shared_memory;
+using boost::interprocess::managed_mapped_file;
+using boost::interprocess::offset_ptr;
+using boost::interprocess::private_node_allocator;
 using boost::interprocess::interprocess_mutex;
 using boost::interprocess::interprocess_condition;
 
-using shm_handle = managed_shared_memory::handle_t;
+using shm_handle = managed_mapped_file::handle_t;
 using mutex_lock = std::unique_lock<boost::interprocess::interprocess_mutex>;
 
+class Scoreboard;
+
+const static char SHM_PATH[] = "/tmp/raft_shm";
 const static size_t SHM_SIZE = 64 * 1024 * 1024;
+
+extern managed_mapped_file shm;
+extern Scoreboard* scoreboard;
+
+template <typename T>
+using pool_allocator =
+    private_node_allocator<T, decltype(shm)::segment_manager, 32>;
+
+template <typename T>
+using unique_ptr = boost::interprocess::unique_ptr<T, pool_allocator<T> >;
+
+template <typename T>
+unique_ptr<T> alloc_unique(pool_allocator<T>* alloc);
 
 enum class APICall {
     Apply
@@ -40,6 +62,48 @@ enum class CallState {
 
 template<typename CT> class SlotHandle;
 
+// call structs
+
+struct ApplyCall {
+    shm_handle cmd_buf;
+    size_t     cmd_len;
+    uint64_t   timeout_ns;
+    uint64_t   dispatch_ns;
+};
+
+struct LogEntry {
+    uint64_t      index;
+    uint64_t      term;
+    raft_log_type log_type;
+    shm_handle    data_buf;
+    size_t        data_len;
+};
+
+class Timings
+{
+public:
+    using clock = std::chrono::high_resolution_clock;
+    using time_point = clock::time_point;
+
+    Timings() = default;
+    Timings(time_point t);
+
+    void record(const char *tag);
+    void record(const char *tag, time_point t);
+    void print();
+private:
+
+    const static uint32_t MAX_ENT = 32;
+
+    struct entry {
+        char       tag[20];
+        time_point ts;
+    };
+
+    uint32_t n_entries;
+    entry    entries[MAX_ENT];
+};
+
 template<typename CT>
 class CallSlot
 {
@@ -53,9 +117,13 @@ public:
     // atomic?
     uint32_t                refcount;
     CallState               state;
-    shm_handle              handle;
+    union {
+        ApplyCall           apply;
+        LogEntry            log_entry;
+    } call;
     uintptr_t               retval;
     RaftError               error;
+    Timings                 timings;
 
     interprocess_mutex      owned;
     bool                    call_ready;
@@ -87,8 +155,6 @@ public:
     RaftCallSlot& grab_slot();
 };
 
-extern Scoreboard* scoreboard;
-
 template<typename CT>
 class SlotHandle
 {
@@ -106,30 +172,19 @@ private:
     std::unique_lock<interprocess_mutex> slot_lock;
 };
 
-extern managed_shared_memory shm;
-
 bool in_shm_bounds(void* ptr);
 
 void shm_init(const char* name, bool create);
 
 pid_t run_raft();
 
-// call structs
+template <typename T>
+unique_ptr<T> alloc_unique(pool_allocator<T>* alloc)
+{
+    T* obj = alloc->allocate_one();
+    return boost::interprocess::make_managed_unique_ptr(obj, *alloc);
+}
 
-struct ApplyCall {
-    shm_handle cmd_buf;
-    size_t     cmd_len;
-    uint64_t   timeout_ns;
-    uint64_t   dispatch_ns;
-};
-
-struct LogEntry {
-    uint64_t      index;
-    uint64_t      term;
-    raft_log_type log_type;
-    shm_handle    data_buf;
-    size_t        data_len;
-};
 
 }
 
