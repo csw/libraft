@@ -12,6 +12,9 @@ CXXFLAGS += -std=c++11 -stdlib=libc++
 CXXFLAGS += -Wall -Werror -pedantic
 CXXFLAGS += -g -MMD
 
+CFLAGS += -Wall -Werror -pedantic
+CFLAGS += -g -MMD
+
 makefile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
 make_dir := $(dir $(makefile_path))
 

@@ -55,7 +55,7 @@ bool raft_is_leader()
     return raft::scoreboard->is_leader;
 }
 
-RaftError raft_apply(void **res, char* cmd, size_t cmd_len, uint64_t timeout_ns)
+RaftError raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns, void **res)
 {
     auto start_t = Timings::clock::now();
     raft::SlotHandle<raft::APICall> sh(raft::scoreboard->grab_slot(),
@@ -169,12 +169,12 @@ void dispatch_fsm_apply_cmd(raft::CallSlot<raft::FSMOp>& slot, raft::LogEntry& l
     slot.retval = (uintptr_t) response;
 }
 
-void* alloc_raft_buffer(size_t len)
+char* alloc_raft_buffer(size_t len)
 {
-    return raft::shm.allocate(len);
+    return (char*) raft::shm.allocate(len);
 }
 
-void free_raft_buffer(void* buf)
+void free_raft_buffer(char* buf)
 {
     raft::shm.deallocate(buf);
 }

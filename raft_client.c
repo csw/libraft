@@ -1,9 +1,8 @@
-#include <cstdio>
-#include <cstdint>
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <unistd.h>
 
-#include "raft_client.h"
-#include "raft_shm.h"
 #include "raft_c_if.h"
 
 const static uint32_t BUFSIZE = 256;
@@ -12,7 +11,7 @@ void* FSMApply(uint64_t index, uint64_t term, RaftLogType type, void *data, size
 {
     printf("FSM: applying command (%lu bytes @ %p): %s\n",
            len, data, (char*)data);
-    return nullptr;
+    return NULL;
 }
 
 RaftFSM fsm_def = { &FSMApply };
@@ -20,6 +19,12 @@ RaftFSM fsm_def = { &FSMApply };
 int main(int argc, char *argv[])
 {
     fprintf(stderr, "C client starting.\n");
+
+    int runs = 20;
+
+    if (argc > 1) {
+        runs = atoi(argv[1]);
+    }
     
     raft_init(&fsm_def);
 
@@ -27,18 +32,17 @@ int main(int argc, char *argv[])
         sleep(1);
     }
 
-    for (int i = 1; i <= 20; ++i) {
-        // oops, need C version
-        char* buf = (char*) raft::shm.allocate(BUFSIZE);
+    for (int i = 1; i <= runs; ++i) {
+        char* buf = alloc_raft_buffer(BUFSIZE);
         fprintf(stderr, "Allocated cmd buffer at %p.\n", buf);
         snprintf(buf, BUFSIZE, "Raft command #%d", i);
         // ignore return value
-        void *result = nullptr;
-        RaftError err = raft_apply(&result, buf, BUFSIZE, 0);
+        void *result = NULL;
+        RaftError err = raft_apply(buf, BUFSIZE, 0, &result);
         if (err) {
             fprintf(stderr, "Raft error: %s\n", raft_err_msg(err));
         }
-        raft::shm.deallocate(buf);
+        free_raft_buffer(buf);
         sleep(1);
     }
 
