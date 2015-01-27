@@ -45,7 +45,8 @@ extern managed_mapped_file shm;
 extern Scoreboard*         scoreboard;
 
 enum class CallTag {
-    Invalid, Apply, Snapshot,
+    Invalid, Apply, Barrier, VerifyLeader, 
+        AddPeer, RemovePeer, SetPeers, Shutdown, Snapshot, 
         FSMApply=100, FSMSnapshot, FSMRestore };
 
 enum class CallState {
@@ -87,6 +88,13 @@ struct Filename {
     const static size_t MAXLEN = 255;
 
     char          path[MAXLEN+1];
+};
+
+struct NetworkAddr {
+    NetworkAddr(const char* host, uint16_t port);
+
+    char          host[256];
+    uint16_t      port;
 };
 
 struct NoReturn {};

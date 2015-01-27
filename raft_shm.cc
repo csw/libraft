@@ -53,6 +53,12 @@ Filename::Filename(const char* path_)
     strncpy(path, path_, MAXLEN);
 }
 
+NetworkAddr::NetworkAddr(const char* host_, uint16_t port_)
+    : port(port_)
+{
+    strncpy(host, host_, 255);
+}
+
 Scoreboard::Scoreboard()
     : is_leader(false)
 {}

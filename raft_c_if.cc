@@ -91,6 +91,22 @@ raft_future raft_snapshot()
     return (raft_future) slot;
 }
 
+raft_future raft_add_peer(const char *host, uint16_t port)
+{
+    auto* slot = shm.construct< CallSlot<NetworkAddr, false> >(anonymous_instance)
+        (CallTag::AddPeer, host, port);
+    scoreboard->api_queue.put(slot->rec());
+    return (raft_future) slot;
+}
+
+raft_future raft_remove_peer(const char *host, uint16_t port)
+{
+    auto* slot = shm.construct< CallSlot<NetworkAddr, false> >(anonymous_instance)
+        (CallTag::RemovePeer, host, port);
+    scoreboard->api_queue.put(slot->rec());
+    return (raft_future) slot;
+}
+
 RaftError raft_future_wait(raft_future f)
 {
     auto* slot = (BaseSlot*) f;

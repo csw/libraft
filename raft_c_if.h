@@ -26,6 +26,12 @@
 extern "C" {
 #endif
 
+typedef struct {
+    char base_dir[256];
+
+    bool single_node;
+} RaftConfig;
+
 // Bottom half; FSM side
 
 typedef void* raft_future;
@@ -66,6 +72,11 @@ raft_future raft_barrier(uint64_t timeout_ns);
 raft_future raft_verify_leader();
 
 raft_future raft_snapshot();
+
+
+raft_future raft_add_peer(const char *host, uint16_t port);
+
+raft_future raft_remove_peer(const char *host, uint16_t port);
 
 // TODO: barrier, snapshot, administrative commands, etc.
 
