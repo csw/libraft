@@ -100,7 +100,30 @@ void* run_snapshot(void *params_v)
     return NULL;
 }
 
-RaftFSM fsm_def = { &FSMApply, &FSMBeginSnapshot };
+int FSMRestore(const char *path)
+{
+    FILE *src = fopen(path, "r");
+    if (src) {
+        uint32_t val;
+        int scanned = fscanf(src, "%u", &val);
+        if (fclose(src)) {
+            perror("Closing snapshot pipe failed");
+            return 1;
+        }
+        if (scanned == 1) {
+            fprintf(stderr, "Read snapshot state: %u\n", val);
+            return 0;
+        } else {
+            fprintf(stderr, "Reading snapshot failed.\n");
+            return 1;
+        }
+    } else {
+        perror("Opening snapshot pipe failed");
+        return 1;
+    }
+}
+
+RaftFSM fsm_def = { &FSMApply, &FSMBeginSnapshot, &FSMRestore };
 
 int main(int argc, char *argv[])
 {

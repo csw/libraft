@@ -35,7 +35,7 @@ typedef struct raft_fsm {
     void* (*apply)(uint64_t index, uint64_t term, RaftLogType type,
                    char *cmd, size_t len);
     void (*begin_snapshot)(const char *path, raft_snapshot_req s);
-    void (*restore)(const char *path);
+    int (*restore)(const char *path);
 } RaftFSM;
 
 void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success);

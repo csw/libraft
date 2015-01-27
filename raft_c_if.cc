@@ -20,6 +20,7 @@ static void run_fsm_worker(RaftFSM* fsm);
 static void dispatch_fsm_apply(CallSlot<LogEntry, true>& slot);
 static void dispatch_fsm_apply_cmd(CallSlot<LogEntry, true>& slot);
 static void dispatch_fsm_snapshot(CallSlot<Filename, false>& slot);
+static void dispatch_fsm_restore(CallSlot<Filename, false>& slot);
 
 static void init_err_msgs();
 static RaftFSM*    fsm;
@@ -146,6 +147,9 @@ void run_fsm_worker(RaftFSM* fsm)
             dispatch_fsm_snapshot((CallSlot<Filename, false>&) *slot);
         }
             break;
+        case CallTag::FSMRestore:
+            dispatch_fsm_restore((CallSlot<Filename, false>&) *slot);
+            break;
         default:
             fprintf(stderr, "Unhandled call type: %d\n",
                     tag);
@@ -195,6 +199,12 @@ void dispatch_fsm_apply_cmd(CallSlot<LogEntry, true>& slot)
 void dispatch_fsm_snapshot(CallSlot<Filename, false>& slot)
 {
     fsm->begin_snapshot(slot.args.path, &slot);
+}
+
+void dispatch_fsm_restore(CallSlot<Filename, false>& slot)
+{
+    int result = fsm->restore(slot.args.path);
+    slot.reply(result == 0 ? RAFT_SUCCESS : RAFT_E_OTHER);
 }
 
 char* alloc_raft_buffer(size_t len)
