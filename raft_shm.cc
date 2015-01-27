@@ -18,6 +18,7 @@ const struct option LONG_OPTS[] = {
     { "port",     required_argument, NULL, 'p' },
     { "single",   no_argument,       NULL, 's' },
     { "peers",    required_argument, NULL, 'P' },
+    { "",         0,                 NULL, 0   }
 };
 
 RaftConfig config;
@@ -98,6 +99,9 @@ void process_args(int argc, char *argv[])
     config.listen_port = 0;
     config.single_node = false;
 
+    int opterr_old = opterr;
+    opterr = 0;
+
     while (true) {
         int optionIdx;
         int c = getopt_long(argc, argv, "d:p:s", LONG_OPTS, &optionIdx);
@@ -116,8 +120,14 @@ void process_args(int argc, char *argv[])
         case 'P': // peers
             strncpy(config.peers, optarg, 255);
             break;
+        case '?': // unknown arg
+            opterr = opterr_old;
+            optind = optind-1;
+            return;
         }
     }
+
+    opterr = opterr_old;
 }
 
 void shm_init(const char* name, bool create)

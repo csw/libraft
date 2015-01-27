@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <ctype.h>
+#include <getopt.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -17,12 +18,16 @@ static uint32_t letter_count = 0;
 static bool snapshot_running = false;
 static pthread_t snapshot_thread;
 
+static unsigned runs = 20;
+static unsigned snapshot_period = 0;
+
 struct snapshot_params {
     const char       *path;
     uint32_t          count;
     raft_snapshot_req req;
 };
 
+void  parse_opts(int argc, char *argv[]);
 void* run_snapshot(void *params_v);
 
 fsm_result_t update_count(const char *buf, size_t len)
@@ -69,6 +74,23 @@ void FSMBeginSnapshot(const char *path, raft_snapshot_req s)
     } else {
         fprintf(stderr, "Snapshot already in progress!\n");
         raft_fsm_snapshot_complete(s, false);
+    }
+}
+
+void parse_opts(int argc, char *argv[])
+{
+    while (true) {
+        int c = getopt(argc, argv, "n:s:");
+        if (c == -1)
+            break;
+        switch (c) {
+        case 'n':
+            runs = strtoul(optarg, NULL, 10);
+            break;
+        case 's':
+            snapshot_period = strtoul(optarg, NULL, 10);
+            break;
+        }
     }
 }
 
@@ -129,13 +151,16 @@ int main(int argc, char *argv[])
 {
     fprintf(stderr, "Raft client starting.\n");
     
-    int runs = 20;
-
     raft_init(&fsm_def, argc, argv);
 
+    parse_opts(argc, argv);
+    printf("%u runs, snapshot period %u.\n", runs, snapshot_period);
+
+    /*
     if (argc > 1) {
         runs = atoi(argv[1]);
     }
+    */
     
     while (! raft_is_leader()) {
         sleep(1);
@@ -160,7 +185,7 @@ int main(int argc, char *argv[])
         free_raft_buffer(buf);
         sleep(1);
 
-        if (i % 5 == 0) {
+        if (snapshot_period && i % snapshot_period == 0) {
             printf("Requesting snapshot.\n");
             raft_future sf = raft_snapshot();
             RaftError err = raft_future_wait(sf);
