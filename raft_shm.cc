@@ -48,6 +48,11 @@ LogEntry::LogEntry(uint64_t index_, uint64_t term_, raft_log_type log_type_,
       data_len(data_len_)
 {}
 
+Filename::Filename(const char* path_)
+{
+    strncpy(path, path_, MAXLEN);
+}
+
 Scoreboard::Scoreboard()
     : is_leader(false)
 {}

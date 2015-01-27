@@ -19,6 +19,7 @@ static void run_fsm_worker(RaftFSM* fsm);
 
 static void dispatch_fsm_apply(CallSlot<LogEntry, true>& slot);
 static void dispatch_fsm_apply_cmd(CallSlot<LogEntry, true>& slot);
+static void dispatch_fsm_snapshot(CallSlot<Filename, false>& slot);
 
 static void init_err_msgs();
 static RaftFSM*    fsm;
@@ -81,6 +82,14 @@ RaftError raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns, void **res)
     return raft_future_get_ptr(f, res);
 }
 
+raft_future raft_snapshot()
+{
+    auto* slot = shm.construct< CallSlot<NoArgs, false> >(anonymous_instance)
+        (CallTag::Snapshot);
+    scoreboard->api_queue.put(slot->rec());
+    return (raft_future) slot;
+}
+
 RaftError raft_future_wait(raft_future f)
 {
     auto* slot = (BaseSlot*) f;
@@ -98,6 +107,13 @@ RaftError raft_future_get_ptr(raft_future f, void** value_ptr)
 void raft_future_dispose(raft_future f)
 {
     ((BaseSlot*)f)->dispose();
+}
+
+void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success)
+{
+    auto slot = (CallSlot<Filename, false>*) s;
+    raft::mutex_lock l(slot->owned);
+    slot->reply(success ? RAFT_SUCCESS : RAFT_E_OTHER);
 }
 
 void start_fsm_worker(RaftFSM* fsm)
@@ -124,6 +140,11 @@ void run_fsm_worker(RaftFSM* fsm)
         switch (tag) {
         case CallTag::FSMApply:
             dispatch_fsm_apply((CallSlot<LogEntry, true>&) *slot);
+            break;
+        case CallTag::FSMSnapshot: {
+            l.unlock();
+            dispatch_fsm_snapshot((CallSlot<Filename, false>&) *slot);
+        }
             break;
         default:
             fprintf(stderr, "Unhandled call type: %d\n",
@@ -169,6 +190,11 @@ void dispatch_fsm_apply_cmd(CallSlot<LogEntry, true>& slot)
     slot.timings.record("FSM command applied");
     fprintf(stderr, "FSM response @ %p\n", response);
     slot.reply((uintptr_t) response);
+}
+
+void dispatch_fsm_snapshot(CallSlot<Filename, false>& slot)
+{
+    fsm->begin_snapshot(slot.args.path, &slot);
 }
 
 char* alloc_raft_buffer(size_t len)

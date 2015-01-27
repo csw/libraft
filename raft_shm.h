@@ -44,7 +44,9 @@ extern pid_t               raft_pid;
 extern managed_mapped_file shm;
 extern Scoreboard*         scoreboard;
 
-enum class CallTag { Invalid, Apply, FSMApply };
+enum class CallTag {
+    Invalid, Apply, Snapshot,
+        FSMApply=100, FSMSnapshot, FSMRestore };
 
 enum class CallState {
     Pending, Dispatched, Success, Error
@@ -77,6 +79,14 @@ struct LogEntry {
     raft_log_type log_type;
     shm_handle    data_buf;
     size_t        data_len;
+};
+
+struct Filename {
+    Filename(const char* path);
+
+    const static size_t MAXLEN = 255;
+
+    char          path[MAXLEN+1];
 };
 
 struct NoReturn {};

@@ -29,13 +29,16 @@ extern "C" {
 // Bottom half; FSM side
 
 typedef void* raft_future;
+typedef void* raft_snapshot_req;
 
 typedef struct raft_fsm {
     void* (*apply)(uint64_t index, uint64_t term, RaftLogType type,
                    char *cmd, size_t len);
-    // TODO: snapshot
-    // TODO: restore
+    void (*begin_snapshot)(const char *path, raft_snapshot_req s);
+    void (*restore)(const char *path);
 } RaftFSM;
+
+void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success);
 
 // Top half; client side
 
@@ -61,6 +64,8 @@ raft_future raft_apply_async(char* cmd, size_t cmd_len, uint64_t timeout_ns);
 raft_future raft_barrier(uint64_t timeout_ns);
 
 raft_future raft_verify_leader();
+
+raft_future raft_snapshot();
 
 // TODO: barrier, snapshot, administrative commands, etc.
 
