@@ -130,11 +130,6 @@ void run_fsm_worker(RaftFSM* fsm)
                     tag);
             abort();
         }
-
-        slot->state = raft::CallState::Success;
-        slot->ret_ready = true;
-        slot->ret_cond.notify_one();
-        slot->timings.record("FSM reply sent");
     }
 }
 
@@ -173,8 +168,7 @@ void dispatch_fsm_apply_cmd(CallSlot<LogEntry, true>& slot)
         fsm->apply(log.index, log.term, log.log_type, data_buf, log.data_len);
     slot.timings.record("FSM command applied");
     fprintf(stderr, "FSM response @ %p\n", response);
-    slot.retval = (uintptr_t) response;
-    slot.error = RAFT_SUCCESS;
+    slot.reply((uintptr_t) response);
 }
 
 char* alloc_raft_buffer(size_t len)

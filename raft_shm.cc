@@ -148,6 +148,23 @@ BaseSlot::call_rec BaseSlot::rec()
     return { tag, pointer(this) };
 }
 
+void BaseSlot::reply(RaftError err)
+{
+    error = err;
+    state = (err == RAFT_SUCCESS) ? CallState::Success : CallState::Error;
+    assert(! ret_ready);
+    ret_ready = true;
+    ret_cond.notify_one();
+    timings.record("reply sent");
+}
+
+void BaseSlot::reply(uint64_t retval_)
+{
+    retval = retval_;
+    reply(RAFT_SUCCESS);
+}
+
+
 void BaseSlot::wait()
 {
     std::unique_lock<interprocess_mutex> lock(owned);

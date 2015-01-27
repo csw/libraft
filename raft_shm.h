@@ -135,6 +135,9 @@ public:
 
     call_rec rec();
 
+    void reply(RaftError err);
+    void reply(uint64_t retval);
+
     void wait();
     virtual void dispose() = 0;
 
