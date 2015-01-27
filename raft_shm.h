@@ -21,6 +21,7 @@
 
 #include "queue.h"
 #include "raft_defs.h"
+#include "raft_c_if.h"
 
 namespace raft {
 
@@ -225,6 +226,7 @@ public:
     std::atomic<bool> is_raft_running;
     std::atomic<bool> is_leader;
 
+    RaftConfig        config;
     
     // TODO: look at using boost::interprocess::message_queue
     queue::ArrayBlockingQueue<BaseSlot::call_rec, 8,
@@ -240,6 +242,8 @@ public:
 };
 
 bool in_shm_bounds(void* ptr);
+
+void process_args(int argc, char *argv[]);
 
 /**
  * Set up shared memory and any resident resources.

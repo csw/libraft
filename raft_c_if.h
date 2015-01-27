@@ -27,9 +27,11 @@ extern "C" {
 #endif
 
 typedef struct {
-    char base_dir[256];
+    char     base_dir[256];
+    uint16_t listen_port;
+    char     peers[256];
 
-    bool single_node;
+    bool     single_node;
 } RaftConfig;
 
 // Bottom half; FSM side
@@ -48,7 +50,7 @@ void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success);
 
 // Top half; client side
 
-pid_t raft_init(RaftFSM *fsm);
+pid_t raft_init(RaftFSM *fsm, int argc, char *argv[]);
 
 bool raft_is_leader();
 

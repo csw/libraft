@@ -43,9 +43,10 @@ const char* raft_err_msg(RaftError err)
     }
 }
 
-pid_t raft_init(RaftFSM *fsm_)
+pid_t raft_init(RaftFSM *fsm_, int argc, char *argv[])
 {
     init_err_msgs();
+    raft::process_args(argc, argv);
     raft::shm_init("raft", true);
 
     fsm = fsm_;

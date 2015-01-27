@@ -128,15 +128,15 @@ RaftFSM fsm_def = { &FSMApply, &FSMBeginSnapshot, &FSMRestore };
 int main(int argc, char *argv[])
 {
     fprintf(stderr, "Raft client starting.\n");
-
+    
     int runs = 20;
+
+    raft_init(&fsm_def, argc, argv);
 
     if (argc > 1) {
         runs = atoi(argv[1]);
     }
     
-    raft_init(&fsm_def);
-
     while (! raft_is_leader()) {
         sleep(1);
     }

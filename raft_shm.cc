@@ -1,5 +1,7 @@
 #include <cstdio>
+#include <getopt.h>
 #include <unistd.h>
+#include <string>
 #include <sys/wait.h>
 
 #include "raft_shm.h"
@@ -10,8 +12,19 @@ using boost::interprocess::unique_instance;
 
 namespace {
 
+const struct option LONG_OPTS[] = {
+    { "dir",      required_argument, NULL, 'd' },
+    { "p",        required_argument, NULL, 'p' },
+    { "port",     required_argument, NULL, 'p' },
+    { "single",   no_argument,       NULL, 's' },
+    { "peers",    required_argument, NULL, 'P' },
+};
+
+RaftConfig config;
+
 std::thread raft_watcher;
 
+std::vector<const char*> build_raft_argv(RaftConfig cfg);
 void watch_raft_proc(pid_t raft_pid);
 void report_process_status(const char *desc, pid_t pid, int status);
 
@@ -78,6 +91,35 @@ bool in_shm_bounds(void* ptr)
     return (cptr >= base) && (cptr < base + shm.get_size());
 }
 
+void process_args(int argc, char *argv[])
+{
+    config.base_dir[0] = '\0';
+    config.peers[0] = '\0';
+    config.listen_port = 0;
+    config.single_node = false;
+
+    while (true) {
+        int optionIdx;
+        int c = getopt_long(argc, argv, "d:p:s", LONG_OPTS, &optionIdx);
+        if (c == -1)
+            break;
+        switch (c) {
+        case 'd': // Raft dir
+            strncpy(config.base_dir, optarg, 255);
+            break;
+        case 'p': // port
+            config.listen_port = atoi(optarg);
+            break;
+        case 's': // single-node
+            config.single_node = true;
+            break;
+        case 'P': // peers
+            strncpy(config.peers, optarg, 255);
+            break;
+        }
+    }
+}
+
 void shm_init(const char* name, bool create)
 {
     // register on-exit callback to call remove()?
@@ -136,8 +178,8 @@ pid_t run_raft()
         return kidpid;
     } else {
         // child
-        
-        int rc = execlp("raft_if", "raft_if", "-single", nullptr);
+        auto argv = build_raft_argv(config);
+        int rc = execvp("raft_if", (char * const *)argv.data());
         if (rc) {
             perror("Exec failed");
         }
@@ -188,6 +230,37 @@ template class CallSlot<ApplyArgs, true>;
 template class CallSlot<LogEntry, true>;
 
 namespace {
+
+std::vector<const char*> build_raft_argv(RaftConfig cfg)
+{
+    std::vector<const char*> args;
+    args.push_back("raft_if");
+
+    if (*cfg.base_dir) {
+        args.push_back("-dir");
+        args.push_back(cfg.base_dir);
+    }
+    if (cfg.listen_port) {
+        args.push_back("-port");
+        auto s = new std::string(std::to_string(cfg.listen_port));
+        args.push_back(s->c_str());
+    }
+    if (cfg.single_node) {
+        args.push_back("-single");
+    }
+    if (*cfg.peers) {
+        args.push_back("-peers");
+        args.push_back(cfg.peers);
+    }
+    args.push_back(nullptr);
+
+    fprintf(stderr, "Raft argv: ");
+    for (const char* arg : args) {
+        fprintf(stderr, "%s ", arg);
+    }
+    fprintf(stderr, "\n");
+    return args;
+}
 
 void watch_raft_proc(pid_t raft_pid)
 {
