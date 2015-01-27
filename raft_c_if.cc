@@ -108,6 +108,14 @@ raft_future raft_remove_peer(const char *host, uint16_t port)
     return (raft_future) slot;
 }
 
+raft_future raft_shutdown()
+{
+    auto* slot = shm.construct< CallSlot<NoArgs, false> >(anonymous_instance)
+        (CallTag::Shutdown);
+    scoreboard->api_queue.put(slot->rec());
+    return (raft_future) slot;
+}
+
 RaftError raft_future_wait(raft_future f)
 {
     auto* slot = (BaseSlot*) f;

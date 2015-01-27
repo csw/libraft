@@ -75,6 +75,8 @@ raft_future raft_verify_leader();
 
 raft_future raft_snapshot();
 
+raft_future raft_shutdown();
+
 
 raft_future raft_add_peer(const char *host, uint16_t port);
 
