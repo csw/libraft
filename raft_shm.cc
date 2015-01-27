@@ -193,7 +193,8 @@ BaseSlot::BaseSlot(CallTag tag_)
       refcount(0),
       state(CallState::Pending),
       retval(0),
-      error(RAFT_SUCCESS)
+      error(RAFT_SUCCESS),
+      timings()
 {}
 
 BaseSlot::call_rec BaseSlot::rec()
