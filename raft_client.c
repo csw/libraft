@@ -62,15 +62,19 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Allocated cmd buffer at %p.\n", buf);
         snprintf(buf, BUFSIZE, "Raft command #%d", i);
         // ignore return value
-        fsm_result_t cur_count_p = NULL;
-        RaftError err = raft_apply(buf, BUFSIZE, 0, (void**)&cur_count_p);
+        raft_future f = raft_apply_async(buf, BUFSIZE, 0);
+        //RaftError err = raft_apply(, (void**)&cur_count_p);
+        RaftError err = raft_future_wait(f);
         if (!err) {
+            fsm_result_t cur_count_p = NULL;
+            raft_future_get_ptr(f, (void**)&cur_count_p);
             assert(cur_count_p);
             printf("FSM state: letter count %u.\n", *cur_count_p);
             free(cur_count_p);
         } else {
             fprintf(stderr, "Raft error: %s\n", raft_err_msg(err));
         }
+        raft_future_dispose(f);
         free_raft_buffer(buf);
         sleep(1);
     }

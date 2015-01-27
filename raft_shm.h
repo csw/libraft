@@ -9,18 +9,22 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <boost/interprocess/managed_mapped_file.hpp>
-#include <boost/interprocess/smart_ptr/unique_ptr.hpp>
 #include <boost/interprocess/allocators/private_node_allocator.hpp>
+#include <boost/interprocess/ipc/message_queue.hpp>
+#include <boost/interprocess/smart_ptr/unique_ptr.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 
+#include "queue.h"
 #include "raft_defs.h"
 
 namespace raft {
 
+using boost::interprocess::anonymous_instance;
 using boost::interprocess::managed_mapped_file;
 using boost::interprocess::offset_ptr;
 using boost::interprocess::private_node_allocator;
@@ -40,46 +44,42 @@ extern pid_t               raft_pid;
 extern managed_mapped_file shm;
 extern Scoreboard*         scoreboard;
 
-template <typename T>
-using pool_allocator =
-    private_node_allocator<T, decltype(shm)::segment_manager, 32>;
-
-template <typename T>
-using unique_ptr = boost::interprocess::unique_ptr<T, pool_allocator<T> >;
-
-template <typename T>
-unique_ptr<T> alloc_unique(pool_allocator<T>* alloc);
-
-enum class APICall {
-    Apply
-};
-
-enum class FSMOp {
-    Apply
-};
+enum class CallTag { Invalid, Apply, FSMApply };
 
 enum class CallState {
     Pending, Dispatched, Success, Error
 };
 
+bool is_terminal(CallState state);
+
 template<typename CT> class SlotHandle;
 
 // call structs
 
-struct ApplyCall {
-    shm_handle cmd_buf;
-    size_t     cmd_len;
-    uint64_t   timeout_ns;
-    uint64_t   dispatch_ns;
+struct NoArgs {};
+
+struct ApplyArgs {
+    ApplyArgs(offset_ptr<char> cmd_buf_, size_t cmd_len_, uint64_t timeout_ns_);
+    ApplyArgs() = delete;
+
+    offset_ptr<char> cmd_buf;
+    size_t           cmd_len;
+    uint64_t         timeout_ns;
 };
 
 struct LogEntry {
+    LogEntry(uint64_t index, uint64_t term, raft_log_type log_type,
+             shm_handle data_buf, size_t data_len);
+    LogEntry() = delete;
+
     uint64_t      index;
     uint64_t      term;
     raft_log_type log_type;
     shm_handle    data_buf;
     size_t        data_len;
 };
+
+struct NoReturn {};
 
 class Timings
 {
@@ -106,39 +106,93 @@ private:
     entry    entries[MAX_ENT];
 };
 
-template<typename CT>
-class CallSlot
+class BaseSlot
 {
 public:
-    CallSlot() = default;
+    using pointer = offset_ptr<BaseSlot>;
+    using call_rec = std::pair<CallTag, BaseSlot::pointer>;
+
+    BaseSlot(CallTag tag);
+
+    virtual ~BaseSlot() = default;
+
+    interprocess_mutex      owned;
+    bool                    ret_ready;
+    interprocess_condition  ret_cond;
+
+    CallTag                 tag;
+    uint32_t                refcount;
+
+    // atomic?
+    CallState               state;
+
+    uint64_t                retval;
+    RaftError               error;
+    Timings                 timings;
+
+    BaseSlot(BaseSlot&) = delete;
+    BaseSlot& operator=(BaseSlot&) = delete;
+
+    call_rec rec();
+
+    void wait();
+    virtual void dispose() = 0;
+
+    virtual RaftError get_ptr(void **res) = 0;
+};
+
+template <typename ArgT, bool HasRet>
+class CallSlot : public BaseSlot
+{
+public:
+    template<typename... Args>
+    CallSlot(CallTag tag_, Args... argv)
+        : BaseSlot(tag_),
+          args(argv...)
+    {}
 
     CallSlot(CallSlot&) = delete;
     CallSlot& operator=(CallSlot&) = delete;
 
-    CT                      call_type;
-    // atomic?
-    uint32_t                refcount;
-    CallState               state;
-    union {
-        ApplyCall           apply;
-        LogEntry            log_entry;
-    } call;
-    uintptr_t               retval;
-    RaftError               error;
-    Timings                 timings;
+    ArgT                    args;
 
-    interprocess_mutex      owned;
-    bool                    call_ready;
-    interprocess_condition  call_cond;
-    bool                    ret_ready;
-    interprocess_condition  ret_cond;
-private:
-    interprocess_mutex      slot_busy;
-    friend class SlotHandle<CT>;
-    friend class Scoreboard;
+    RaftError get_ptr(void** res)
+    {
+        if (! is_terminal(state)) {
+            wait();
+        }
+
+        if (HasRet) {
+            if (res) {
+                if (error == RAFT_SUCCESS) {
+                    *res = (void*) retval;
+                }
+                return error;
+            } else {
+                return RAFT_E_INVALID_ADDRESS;
+            }
+        } else {
+            return RAFT_E_INVALID_OP;
+        }
+    }
+    
+    void dispose()
+    {
+        
+        std::unique_lock<interprocess_mutex> lock(owned);
+        if (ret_ready) {
+            lock.unlock();
+            shm.destroy_ptr(this);
+        } else {
+            assert(false && "not implemented");
+        }
+    }
 };
-using RaftCallSlot = CallSlot<APICall>;
-using FSMCallSlot = CallSlot<FSMOp>;
+
+extern template class CallSlot<NoArgs, true>;
+extern template class CallSlot<NoArgs, false>;
+extern template class CallSlot<ApplyArgs, true>;
+extern template class CallSlot<LogEntry, true>;
 
 class Scoreboard
 {
@@ -149,29 +203,19 @@ public:
 
     std::atomic<bool> is_raft_running;
     std::atomic<bool> is_leader;
-    RaftCallSlot slots[16];
-    FSMCallSlot  fsm_slot;
+
+    
+    // TODO: look at using boost::interprocess::message_queue
+    queue::ArrayBlockingQueue<BaseSlot::call_rec, 8,
+                              interprocess_mutex,
+                              interprocess_condition> api_queue;
+
+    queue::ArrayBlockingQueue<BaseSlot::call_rec, 8,
+                              interprocess_mutex,
+                              interprocess_condition> fsm_queue;
 
     Scoreboard(Scoreboard&) = delete;
     Scoreboard& operator=(Scoreboard&) = delete;
-    RaftCallSlot& grab_slot();
-};
-
-template<typename CT>
-class SlotHandle
-{
-public:
-    SlotHandle(CallSlot<CT>& slot);
-    SlotHandle(CallSlot<CT>& slot, std::adopt_lock_t _t);
-    ~SlotHandle();
-
-    SlotHandle(SlotHandle&) = delete;
-    SlotHandle& operator=(SlotHandle&) = delete;
-
-    CallSlot<CT>& slot;
-
-private:
-    std::unique_lock<interprocess_mutex> slot_lock;
 };
 
 bool in_shm_bounds(void* ptr);
@@ -191,14 +235,6 @@ void shm_init(const char* name, bool create);
  * To be called from the client after shm_init().
  */
 pid_t run_raft();
-
-template <typename T>
-unique_ptr<T> alloc_unique(pool_allocator<T>* alloc)
-{
-    T* obj = alloc->allocate_one();
-    return boost::interprocess::make_managed_unique_ptr(obj, *alloc);
-}
-
 
 }
 

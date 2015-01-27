@@ -28,6 +28,8 @@ extern "C" {
 
 // Bottom half; FSM side
 
+typedef void* raft_future;
+
 typedef struct raft_fsm {
     void* (*apply)(uint64_t index, uint64_t term, RaftLogType type,
                    char *cmd, size_t len);
@@ -54,7 +56,18 @@ bool raft_is_leader();
 RaftError raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns,
                      void **res);
 
+raft_future raft_apply_async(char* cmd, size_t cmd_len, uint64_t timeout_ns);
+
+raft_future raft_barrier(uint64_t timeout_ns);
+
+raft_future raft_verify_leader();
+
 // TODO: barrier, snapshot, administrative commands, etc.
+
+RaftError raft_future_wait(raft_future f);
+//int raft_future_wait_for(raft_future f, uint64_t wait_ms);
+RaftError raft_future_get_ptr(raft_future f, void** value_ptr);
+void raft_future_dispose(raft_future f);
 
 char* alloc_raft_buffer(size_t len);
 void free_raft_buffer(char* buf);

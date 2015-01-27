@@ -27,6 +27,8 @@ typedef enum raft_error {
     RAFT_E_TRANSPORT_SHUTDOWN,
     RAFT_E_PIPELINE_SHUTDOWN,
     RAFT_E_OTHER,
+    RAFT_E_INVALID_OP,
+    RAFT_E_INVALID_ADDRESS,
     N_RAFT_ERRORS // end marker, not an error!
 } RaftError;
 

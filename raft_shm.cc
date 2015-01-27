@@ -21,6 +21,33 @@ pid_t               raft_pid;
 managed_mapped_file shm;
 Scoreboard*         scoreboard;
 
+bool is_terminal(CallState state)
+{
+    switch (state) {
+    case CallState::Pending:
+    case CallState::Dispatched:
+        return false;
+    case CallState::Success:
+    case CallState::Error:
+        return true;
+    }
+}
+
+ApplyArgs::ApplyArgs(offset_ptr<char> cmd_buf_, size_t cmd_len_, uint64_t timeout_ns_)
+    : cmd_buf(cmd_buf_),
+      cmd_len(cmd_len_),
+      timeout_ns(timeout_ns_)
+{}
+
+LogEntry::LogEntry(uint64_t index_, uint64_t term_, raft_log_type log_type_,
+                   shm_handle data_buf_, size_t data_len_)
+    : index(index_),
+      term(term_),
+      log_type(log_type_),
+      data_buf(data_buf_),
+      data_len(data_len_)
+{}
+
 Scoreboard::Scoreboard()
     : is_leader(false)
 {}
@@ -32,43 +59,6 @@ void Scoreboard::wait_for_raft(pid_t raft_pid)
         usleep(100000); // 100 ms
     }
 }
-
-RaftCallSlot& Scoreboard::grab_slot()
-{
-    for (;;) {
-        for (int i = 0; i < 16; ++i) {
-            if (slots[i].slot_busy.try_lock()) {
-                return slots[i];
-            }
-        }
-        usleep(5000); // 5 ms
-    }
-}
-
-template <typename CT>
-SlotHandle<CT>::SlotHandle(CallSlot<CT>& slot_)
-    : slot(slot_),
-      slot_lock(slot.slot_busy)
-{
-    ++slot.refcount;
-}
-
-template <typename CT>
-SlotHandle<CT>::SlotHandle(CallSlot<CT>& slot_, std::adopt_lock_t _t)
-    : slot(slot_),
-      slot_lock(slot.slot_busy, std::adopt_lock)
-{
-    ++slot.refcount;
-}
-
-template <typename CT>
-SlotHandle<CT>::~SlotHandle()
-{
-    --slot.refcount;
-}
-
-template class SlotHandle<APICall>;
-template class SlotHandle<FSMOp>;
 
 bool in_shm_bounds(void* ptr)
 {
@@ -143,6 +133,31 @@ pid_t run_raft()
         exit(1);
     }
 }
+
+BaseSlot::BaseSlot(CallTag tag_)
+    : ret_ready(false),
+      tag(tag_),
+      refcount(0),
+      state(CallState::Pending),
+      retval(0),
+      error(RAFT_SUCCESS)
+{}
+
+BaseSlot::call_rec BaseSlot::rec()
+{
+    return { tag, pointer(this) };
+}
+
+void BaseSlot::wait()
+{
+    std::unique_lock<interprocess_mutex> lock(owned);
+    ret_cond.wait(lock, [&] () { return ret_ready; });
+}
+
+template class CallSlot<NoArgs, true>;
+template class CallSlot<NoArgs, false>;
+template class CallSlot<ApplyArgs, true>;
+template class CallSlot<LogEntry, true>;
 
 namespace {
 

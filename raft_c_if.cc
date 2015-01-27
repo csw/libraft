@@ -17,12 +17,18 @@ using namespace raft;
 static void start_fsm_worker(RaftFSM* fsm);
 static void run_fsm_worker(RaftFSM* fsm);
 
-static void dispatch_fsm_apply(raft::FSMCallSlot& slot, raft::LogEntry& log);
-static void dispatch_fsm_apply_cmd(raft::FSMCallSlot& slot, raft::LogEntry& log);
+static void dispatch_fsm_apply(CallSlot<LogEntry, true>& slot);
+static void dispatch_fsm_apply_cmd(CallSlot<LogEntry, true>& slot);
 
 static void init_err_msgs();
 static RaftFSM*    fsm;
 static std::thread fsm_worker;
+
+namespace alloc {
+
+//pool_allocator< CallSlot<ApplyArgs, true> > apply;
+
+}
 
 static std::vector<const char*> err_msgs;
 
@@ -54,52 +60,44 @@ bool raft_is_leader()
     return raft::scoreboard->is_leader;
 }
 
-RaftError raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns, void **res)
+raft_future raft_apply_async(char* cmd, size_t cmd_len, uint64_t timeout_ns)
 {
     auto start_t = Timings::clock::now();
-    raft::SlotHandle<raft::APICall> sh(raft::scoreboard->grab_slot(),
-                                       std::adopt_lock);
-    raft::RaftCallSlot& slot = sh.slot;
-    slot.timings = Timings(start_t);
-    std::unique_lock<interprocess_mutex> l(slot.owned);
-    slot.timings.record("slot owned");
-    slot.call_type = raft::APICall::Apply;
-    slot.state = raft::CallState::Pending;
+    auto* slot = shm.construct< CallSlot<ApplyArgs, true> >(anonymous_instance)
+        (CallTag::Apply, cmd, cmd_len, timeout_ns);
+    fprintf(stderr, "Allocated call slot at %p.\n", slot);
+    slot->timings = Timings(start_t);
+    slot->timings.record("constructed");
+    scoreboard->api_queue.put(slot->rec());
+    
+    return (raft_future) slot;
+}
 
-    ApplyCall& call = slot.call.apply;
-    call.cmd_buf = raft::shm.get_handle_from_address(cmd);
-    call.cmd_len = cmd_len;
-    call.timeout_ns = timeout_ns;
-    call.dispatch_ns = 0;
+RaftError raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns, void **res)
+{
+    raft_future f = raft_apply_async(cmd, cmd_len, timeout_ns);
+    raft_future_wait(f);
+    fprintf(stderr, "Result of call %p is ready.\n", f);
+    return raft_future_get_ptr(f, res);
+}
 
-    slot.call_ready = true;
-    slot.call_cond.notify_one();
-    slot.timings.record("call issued");
-    slot.ret_cond.wait(l, [&] () { return slot.ret_ready; });
-    slot.timings.record("call returned");
+RaftError raft_future_wait(raft_future f)
+{
+    auto* slot = (BaseSlot*) f;
+    slot->wait();
+    slot->timings.record("result received");
+    slot->timings.print();
+    return RAFT_SUCCESS;
+}
 
-    if (slot.state == raft::CallState::Success) {
-        assert(slot.error == RAFT_SUCCESS);
-        void* ret_ptr = (void*) slot.retval;
-        fprintf(stderr, "Apply return value @ %p\n", ret_ptr);
-        if (res)
-            *res = ret_ptr;
+RaftError raft_future_get_ptr(raft_future f, void** value_ptr)
+{
+    return ((BaseSlot*)f)->get_ptr(value_ptr);
+}
 
-    } else if (slot.state == raft::CallState::Error) {
-        assert(slot.error != RAFT_SUCCESS);
-        if (res)
-            *res = nullptr;
-
-    } else {
-        fprintf(stderr, "Unexpected call state %d!\n", slot.state);
-        abort();
-    }
-
-    slot.ret_ready = false;
-    slot.timings.record("call completed");
-    slot.timings.print();
-
-    return slot.error;
+void raft_future_dispose(raft_future f)
+{
+    ((BaseSlot*)f)->dispose();
 }
 
 void start_fsm_worker(RaftFSM* fsm)
@@ -112,37 +110,41 @@ void start_fsm_worker(RaftFSM* fsm)
 void run_fsm_worker(RaftFSM* fsm)
 {
     fprintf(stderr, "FSM worker starting.\n");
-    raft::FSMCallSlot& slot = raft::scoreboard->fsm_slot;
-
+    
     for (;;) {
-        // refactor, combine this with the Go side...
-        raft::mutex_lock l(slot.owned);
-        slot.call_cond.wait(l, [&] () { return slot.call_ready; });
-        assert(slot.state == raft::CallState::Pending);
+        auto rec = scoreboard->fsm_queue.take();
+        CallTag tag = rec.first;
+        BaseSlot::pointer slot = rec.second;
+        raft::mutex_lock l(slot->owned);
+        slot->timings.record("FSM call received");
+        fprintf(stderr, "FSM call received, tag %d, call %p.\n",
+                tag, rec.second.get());
+        assert(slot->state == raft::CallState::Pending);
 
-        switch (slot.call_type) {
-        case raft::FSMOp::Apply:
-            dispatch_fsm_apply(slot, slot.call.log_entry);
+        switch (tag) {
+        case CallTag::FSMApply:
+            dispatch_fsm_apply((CallSlot<LogEntry, true>&) *slot);
             break;
         default:
-            fprintf(stderr, "Unhandled log entry type: %d\n",
-                    slot.call_type);
+            fprintf(stderr, "Unhandled call type: %d\n",
+                    tag);
             abort();
         }
 
-        slot.state = raft::CallState::Success;
-        slot.ret_ready = true;
-        slot.ret_cond.notify_one();
-        slot.call_ready = false;
-        
+        slot->state = raft::CallState::Success;
+        slot->ret_ready = true;
+        slot->ret_cond.notify_one();
+        slot->timings.record("FSM reply sent");
     }
 }
 
-void dispatch_fsm_apply(raft::CallSlot<raft::FSMOp>& slot, raft::LogEntry& log)
+void dispatch_fsm_apply(CallSlot<LogEntry, true>& slot)
 {
+    LogEntry& log = slot.args;
+
     switch (log.log_type) {
     case RAFT_LOG_COMMAND:
-        dispatch_fsm_apply_cmd(slot, log);
+        dispatch_fsm_apply_cmd(slot);
         break;
     case RAFT_LOG_NOOP:
         fprintf(stderr, "FSM command: noop\n");
@@ -159,21 +161,25 @@ void dispatch_fsm_apply(raft::CallSlot<raft::FSMOp>& slot, raft::LogEntry& log)
     }
 }
 
-void dispatch_fsm_apply_cmd(raft::CallSlot<raft::FSMOp>& slot, raft::LogEntry& log)
+void dispatch_fsm_apply_cmd(CallSlot<LogEntry, true>& slot)
 {
+    LogEntry& log = slot.args;
     assert(log.data_buf);
     char* data_buf = (char*) raft::shm.get_address_from_handle(log.data_buf);
     fprintf(stderr, "Found command buffer at %p.\n", data_buf);
-    slot.state = raft::CallState::Dispatched;
+    slot.state = CallState::Dispatched;
+    slot.timings.record("FSM call dispatched");
     void* response =
         fsm->apply(log.index, log.term, log.log_type, data_buf, log.data_len);
+    slot.timings.record("FSM command applied");
     fprintf(stderr, "FSM response @ %p\n", response);
     slot.retval = (uintptr_t) response;
+    slot.error = RAFT_SUCCESS;
 }
 
 char* alloc_raft_buffer(size_t len)
 {
-    return (char*) raft::shm.allocate(len);
+    return (char*) shm.allocate(len);
 }
 
 void free_raft_buffer(char* buf)
@@ -198,4 +204,6 @@ void init_err_msgs()
     err_msgs[RAFT_E_TRANSPORT_SHUTDOWN] = "transport shutdown";
     err_msgs[RAFT_E_PIPELINE_SHUTDOWN] = "append pipeline closed";
     err_msgs[RAFT_E_OTHER] = "undetermined error";
+    err_msgs[RAFT_E_INVALID_OP] = "invalid operation for call";
+    err_msgs[RAFT_E_INVALID_ADDRESS] = "invalid address";
 }
