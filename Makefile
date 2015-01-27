@@ -27,8 +27,9 @@ run_client: raft_client $(GO_PROG)
 
 $(GO_PROG): $(GO_DIR)/raft_if.go $(GO_DIR)/raft_go_if.h $(GO_DIR)/raft_go_if.cc \
            libraft.a
+	go clean -i $(GO_LIB)
 	CGO_CPPFLAGS=-I$(make_dir) CGO_LDFLAGS=-L$(make_dir) \
-		go install -a $(GO_LIB)
+		go install $(GO_LIB)
 
 -include $(patsubst %.cc,%.d,*.cc)
 
