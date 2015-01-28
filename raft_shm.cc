@@ -16,8 +16,10 @@ namespace api {
 // required to avoid stupid link errors...
 
 #define api_call(name, argT, hasRet) \
-    const CallTag name::tag;
+    const CallTag       name::tag; \
+    name::allocator_t*  name::allocator;
 #include "raft_api_calls.h"
+#include "raft_fsm_calls.h"
 #undef api_call
 
 }
@@ -40,6 +42,8 @@ std::thread raft_watcher;
 std::vector<const char*> build_raft_argv(RaftConfig cfg);
 void watch_raft_proc(pid_t raft_pid);
 void report_process_status(const char *desc, pid_t pid, int status);
+void init_client_allocators();
+void init_raft_allocators();
 
 }
 
@@ -177,6 +181,7 @@ void shm_init(const char* name, bool create)
         shm = managed_mapped_file(boost::interprocess::create_only, 
                                   SHM_PATH, SHM_SIZE);
         scoreboard = shm.construct<Scoreboard>(unique_instance)();
+        init_client_allocators();
         zlog_debug(shm_cat, "Initialized shared memory and scoreboard.");
     } else {
         // Raft side
@@ -193,6 +198,7 @@ void shm_init(const char* name, bool create)
         auto ret = shm.find<Scoreboard>(unique_instance);
         scoreboard = ret.first;
         assert(scoreboard);
+        init_raft_allocators();
         zlog_debug(shm_cat, "Found scoreboard.");
     }
     zlog_debug(shm_cat, "Mapped shared memory at base address %p.",
@@ -266,11 +272,6 @@ void BaseSlot::wait()
     std::unique_lock<interprocess_mutex> lock(owned);
     ret_cond.wait(lock, [&] () { return ret_ready; });
 }
-
-template class CallSlot<NoArgs, true>;
-template class CallSlot<NoArgs, false>;
-template class CallSlot<ApplyArgs, true>;
-template class CallSlot<LogEntry, true>;
 
 namespace {
 
@@ -349,6 +350,22 @@ void report_process_status(const char *desc, pid_t pid, int status)
     } else {
         assert(false && "impossible process status!");
     }
+}
+
+void init_client_allocators()
+{
+#define api_call(name, argT, hasRet) \
+    api::name::allocator = new api::name::allocator_t(shm.get_segment_manager());
+#include "raft_api_calls.h"
+#undef api_call
+}
+
+void init_raft_allocators()
+{
+#define api_call(name, argT, hasRet)                                    \
+    api::name::allocator = new api::name::allocator_t(shm.get_segment_manager());
+#include "raft_fsm_calls.h"
+#undef api_call
 }
 
 }

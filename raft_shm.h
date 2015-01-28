@@ -176,20 +176,20 @@ public:
     virtual RaftError get_ptr(void **res) = 0;
 };
 
-template <typename ArgT, bool HasRet>
+template <typename Call>
 class CallSlot : public BaseSlot
 {
 public:
     template<typename... Args>
-    CallSlot(CallTag tag_, Args... argv)
-        : BaseSlot(tag_),
+    CallSlot(Args... argv)
+        : BaseSlot(Call::tag),
           args(argv...)
     {}
 
     CallSlot(CallSlot&) = delete;
     CallSlot& operator=(CallSlot&) = delete;
 
-    const ArgT                    args;
+    const typename Call::arg_t         args;
 
     RaftError get_ptr(void** res)
     {
@@ -197,7 +197,7 @@ public:
             wait();
         }
 
-        if (HasRet) {
+        if (Call::has_ret) {
             if (res) {
                 if (error == RAFT_SUCCESS) {
                     *res = (void*) retval;
@@ -217,31 +217,30 @@ public:
         std::unique_lock<interprocess_mutex> lock(owned);
         if (ret_ready) {
             lock.unlock();
-            shm.destroy_ptr(this);
+            Call::allocator->deallocate_one(this);
+            //shm.destroy_ptr(this);
         } else {
             assert(false && "not implemented");
         }
     }
 };
 
-extern template class CallSlot<NoArgs, true>;
-extern template class CallSlot<NoArgs, false>;
-extern template class CallSlot<ApplyArgs, true>;
-extern template class CallSlot<LogEntry, true>;
+#define api_call(name, argT, hasRet)                                    \
+    struct name {                                                       \
+        const static CallTag tag = CallTag::name;                       \
+        const static bool    has_ret = hasRet;                          \
+        using arg_t = argT;                                             \
+        using slot_t = CallSlot<name>;                                  \
+        using allocator_t = private_node_allocator<slot_t, decltype(shm)::segment_manager, 256>; \
+        static allocator_t* allocator;                                  \
+    };
 
 namespace api {
-
-#define api_call(name, argT, hasRet) \
-    struct name { \
-    const static CallTag tag = CallTag::name; \
-    const static bool    has_ret = hasRet; \
-    using arg_t = argT; \
-    using slot_t = CallSlot<arg_t, has_ret>; \
-    };
 #include "raft_api_calls.h"
+#include "raft_fsm_calls.h"
+}
 #undef api_call
 
-}
 
 using CallQueue =
     queue::ArrayBlockingQueue<BaseSlot::call_rec, 8,
@@ -272,8 +271,8 @@ template <typename Call, typename... Args>
 typename Call::slot_t* send_request(CallQueue& queue, Args... argv)
 {
     auto start_t = Timings::clock::now();
-    auto* slot = shm.construct< typename Call::slot_t >(anonymous_instance)
-        (Call::tag, argv...);
+    auto slot_ptr = Call::allocator->allocate_one();
+    auto* slot = new(&*slot_ptr) typename Call::slot_t (argv...);
     auto built_t = Timings::clock::now();
     slot->timings = Timings(start_t);
     slot->timings.record("constructed", built_t);
@@ -285,6 +284,12 @@ template <typename Call, typename... Args>
 typename Call::slot_t* send_api_request(Args... argv)
 {
     return send_request<Call, Args...>(scoreboard->api_queue, argv...);
+}
+
+template <typename Call, typename... Args>
+typename Call::slot_t* send_fsm_request(Args... argv)
+{
+    return send_request<Call, Args...>(scoreboard->fsm_queue, argv...);
 }
 
 

@@ -18,10 +18,10 @@ using namespace raft;
 static void start_fsm_worker(RaftFSM* fsm);
 static void run_fsm_worker(RaftFSM* fsm);
 
-static void dispatch_fsm_apply(CallSlot<LogEntry, true>& slot);
-static void dispatch_fsm_apply_cmd(CallSlot<LogEntry, true>& slot);
-static void dispatch_fsm_snapshot(CallSlot<Filename, false>& slot);
-static void dispatch_fsm_restore(CallSlot<Filename, false>& slot);
+static void dispatch_fsm_apply(api::FSMApply::slot_t& slot);
+static void dispatch_fsm_apply_cmd(api::FSMApply::slot_t& slot);
+static void dispatch_fsm_snapshot(api::FSMSnapshot::slot_t& slot);
+static void dispatch_fsm_restore(api::FSMRestore::slot_t& slot);
 
 static void init_err_msgs();
 static RaftFSM*    fsm;
@@ -142,7 +142,7 @@ void raft_future_dispose(raft_future f)
 
 void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success)
 {
-    auto slot = (CallSlot<Filename, false>*) s;
+    auto slot = (api::FSMSnapshot::slot_t*) s;
     raft::mutex_lock l(slot->owned);
     slot->reply(success ? RAFT_SUCCESS : RAFT_E_OTHER);
 }
@@ -170,15 +170,15 @@ void run_fsm_worker(RaftFSM* fsm)
 
         switch (tag) {
         case CallTag::FSMApply:
-            dispatch_fsm_apply((CallSlot<LogEntry, true>&) *slot);
+            dispatch_fsm_apply((api::FSMApply::slot_t&) *slot);
             break;
         case CallTag::FSMSnapshot: {
             l.unlock();
-            dispatch_fsm_snapshot((CallSlot<Filename, false>&) *slot);
+            dispatch_fsm_snapshot((api::FSMSnapshot::slot_t&) *slot);
         }
             break;
         case CallTag::FSMRestore:
-            dispatch_fsm_restore((CallSlot<Filename, false>&) *slot);
+            dispatch_fsm_restore((api::FSMRestore::slot_t&) *slot);
             break;
         default:
             zlog_fatal(msg_cat, "Unhandled call type: %d", tag);
@@ -187,7 +187,7 @@ void run_fsm_worker(RaftFSM* fsm)
     }
 }
 
-void dispatch_fsm_apply(CallSlot<LogEntry, true>& slot)
+void dispatch_fsm_apply(api::FSMApply::slot_t& slot)
 {
     const LogEntry& log = slot.args;
 
@@ -210,7 +210,7 @@ void dispatch_fsm_apply(CallSlot<LogEntry, true>& slot)
     }
 }
 
-void dispatch_fsm_apply_cmd(CallSlot<LogEntry, true>& slot)
+void dispatch_fsm_apply_cmd(api::FSMApply::slot_t& slot)
 {
     const LogEntry& log = slot.args;
     assert(log.data_buf);
@@ -225,13 +225,13 @@ void dispatch_fsm_apply_cmd(CallSlot<LogEntry, true>& slot)
     slot.reply((uintptr_t) response);
 }
 
-void dispatch_fsm_snapshot(CallSlot<Filename, false>& slot)
+void dispatch_fsm_snapshot(api::FSMSnapshot::slot_t& slot)
 {
     assert(strlen(slot.args.path) > 0);
     fsm->begin_snapshot(slot.args.path, &slot);
 }
 
-void dispatch_fsm_restore(CallSlot<Filename, false>& slot)
+void dispatch_fsm_restore(api::FSMRestore::slot_t& slot)
 {
     assert(strlen(slot.args.path) > 0);
     zlog_info(fsm_cat, "Passing restore request to FSM, path %s.",
