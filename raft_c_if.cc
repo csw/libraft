@@ -175,7 +175,7 @@ void run_fsm_worker(RaftFSM* fsm)
 
 void dispatch_fsm_apply(CallSlot<LogEntry, true>& slot)
 {
-    LogEntry& log = slot.args;
+    const LogEntry& log = slot.args;
 
     switch (log.log_type) {
     case RAFT_LOG_COMMAND:
@@ -198,7 +198,7 @@ void dispatch_fsm_apply(CallSlot<LogEntry, true>& slot)
 
 void dispatch_fsm_apply_cmd(CallSlot<LogEntry, true>& slot)
 {
-    LogEntry& log = slot.args;
+    const LogEntry& log = slot.args;
     assert(log.data_buf);
     char* data_buf = (char*) raft::shm.get_address_from_handle(log.data_buf);
     zlog_debug(fsm_cat, "Found command buffer at %p.", data_buf);

@@ -151,7 +151,7 @@ public:
     bool                    ret_ready;
     interprocess_condition  ret_cond;
 
-    CallTag                 tag;
+    const CallTag           tag;
     uint32_t                refcount;
 
     // atomic?
@@ -188,7 +188,7 @@ public:
     CallSlot(CallSlot&) = delete;
     CallSlot& operator=(CallSlot&) = delete;
 
-    ArgT                    args;
+    const ArgT                    args;
 
     RaftError get_ptr(void** res)
     {
