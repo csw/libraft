@@ -52,9 +52,9 @@ pid_t raft_init(RaftFSM *fsm_, int argc, char *argv[])
     fsm = fsm_;
     raft::run_raft();
     zlog_info(shm_cat, "Started Raft process: pid %d.", raft_pid);
+    start_fsm_worker(fsm);
     raft::scoreboard->wait_for_raft(raft_pid);
     zlog_debug(shm_cat, "Raft is running.");
-    start_fsm_worker(fsm);
     return raft_pid;
 }
 
