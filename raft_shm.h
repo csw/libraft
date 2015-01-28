@@ -50,6 +50,7 @@ extern zlog_category_t*    shm_cat;
 extern pid_t               raft_pid;
 extern managed_mapped_file shm;
 extern Scoreboard*         scoreboard;
+extern bool                shutdown_requested;
 
 enum class CallTag {
     Invalid, Apply, Barrier, VerifyLeader, 
@@ -299,6 +300,8 @@ void process_args(int argc, char *argv[]);
  *               or map an existing one (for the Raft side).
  */
 void shm_init(const char* name, bool create);
+
+void shm_cleanup();
 
 /**
  * Start the Raft process.

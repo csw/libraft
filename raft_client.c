@@ -259,6 +259,8 @@ int main(int argc, char *argv[])
 
     raft_future sf = raft_shutdown();
     raft_future_wait(sf);
+    printf("Raft is shut down.\n");
+    raft_cleanup();
 
     return 0;
 }

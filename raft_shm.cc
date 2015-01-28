@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <getopt.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <string>
 #include <sys/wait.h>
 
@@ -50,6 +51,7 @@ bool                msg_timing = false;
 pid_t               raft_pid;
 managed_mapped_file shm;
 Scoreboard*         scoreboard;
+bool                shutdown_requested = false;
 
 bool is_terminal(CallState state)
 {
@@ -197,6 +199,12 @@ void shm_init(const char* name, bool create)
                raft::shm.get_address());
 }
 
+void shm_cleanup()
+{
+    if (raft_watcher.joinable())
+        raft_watcher.join();
+}
+
 pid_t run_raft()
 {
     pid_t kidpid = fork();
@@ -312,7 +320,13 @@ void watch_raft_proc(pid_t raft_pid)
             } else {
                 report_process_status("Raft process", raft_pid, status);
                 // TODO: bubble this back up to the client? recover?
-                exit(1);
+                if (shutdown_requested
+                    && WIFEXITED(status)
+                    && WEXITSTATUS(status) == 0) {
+                    return;
+                } else {
+                    exit(1);
+                }
             }
         } else {
             perror("waitpid failed");

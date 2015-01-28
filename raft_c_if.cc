@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <pthread.h>
 #include <sys/types.h>
 
 #include <chrono>
@@ -58,6 +59,18 @@ pid_t raft_init(RaftFSM *fsm_, int argc, char *argv[])
     return raft_pid;
 }
 
+void raft_cleanup()
+{
+    zlog_debug(fsm_cat, "Canceling FSM worker thread.");
+    if (fsm_worker.get_id() != std::thread::id()) {
+        if (pthread_cancel(fsm_worker.native_handle())) {
+            perror("Failed to cancel FSM worker thread");
+        }
+        fsm_worker.join();
+    }
+    raft::shm_cleanup();
+}
+
 bool raft_is_leader()
 {
     return raft::scoreboard->is_leader;
@@ -104,6 +117,7 @@ raft_future raft_remove_peer(const char *host, uint16_t port)
 
 raft_future raft_shutdown()
 {
+    raft::shutdown_requested = true;
     return (raft_future) send_api_request<api::Shutdown>();
 }
 

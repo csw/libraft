@@ -51,6 +51,7 @@ void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success);
 // Top half; client side
 
 pid_t raft_init(RaftFSM *fsm, int argc, char *argv[]);
+void raft_cleanup();
 
 bool raft_is_leader();
 
