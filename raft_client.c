@@ -39,7 +39,7 @@ fsm_result_t update_count(const char *buf, size_t len)
     const char * const endp = buf+len;
     while (buf < endp) {
         char c = *buf++;
-        if (isalpha(*buf++)) {
+        if (isalpha(c)) {
             ++letter_count;
         } else if (c == '\0') {
             break;
