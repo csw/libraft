@@ -69,6 +69,10 @@ ApplyArgs::ApplyArgs(offset_ptr<char> cmd_buf_, size_t cmd_len_, uint64_t timeou
       timeout_ns(timeout_ns_)
 {}
 
+BarrierArgs::BarrierArgs(uint64_t timeout_ns_)
+    : timeout_ns(timeout_ns_)
+{}
+
 LogEntry::LogEntry(uint64_t index_, uint64_t term_, raft_log_type log_type_,
                    shm_handle data_buf_, size_t data_len_)
     : index(index_),

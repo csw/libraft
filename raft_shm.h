@@ -77,6 +77,12 @@ struct ApplyArgs {
     uint64_t         timeout_ns;
 };
 
+struct BarrierArgs {
+    BarrierArgs(uint64_t timeout_ns);
+
+    uint64_t         timeout_ns;
+};
+
 struct LogEntry {
     LogEntry(uint64_t index, uint64_t term, raft_log_type log_type,
              shm_handle data_buf, size_t data_len);

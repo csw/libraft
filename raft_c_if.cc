@@ -77,6 +77,16 @@ RaftError raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns, void **res)
     return raft_future_get_ptr(f, res);
 }
 
+raft_future raft_barrier(uint64_t timeout_ns)
+{
+    return (raft_future) send_api_request<api::Barrier>(timeout_ns);
+}
+
+raft_future raft_verify_leader()
+{
+    return (raft_future) send_api_request<api::VerifyLeader>();
+}
+
 raft_future raft_snapshot()
 {
     return (raft_future) send_api_request<api::Snapshot>();
