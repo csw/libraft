@@ -10,6 +10,17 @@ namespace raft {
 
 using boost::interprocess::unique_instance;
 
+namespace api {
+
+// required to avoid stupid link errors...
+
+#define api_call(name, argT, hasRet) \
+    const CallTag name::tag;
+#include "raft_api_calls.h"
+#undef api_call
+
+}
+
 namespace {
 
 const struct option LONG_OPTS[] = {

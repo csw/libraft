@@ -222,6 +222,25 @@ extern template class CallSlot<NoArgs, false>;
 extern template class CallSlot<ApplyArgs, true>;
 extern template class CallSlot<LogEntry, true>;
 
+namespace api {
+
+#define api_call(name, argT, hasRet) \
+    struct name { \
+    const static CallTag tag = CallTag::name; \
+    const static bool    has_ret = hasRet; \
+    using arg_t = argT; \
+    using slot_t = CallSlot<arg_t, has_ret>; \
+    };
+#include "raft_api_calls.h"
+#undef api_call
+
+}
+
+using CallQueue =
+    queue::ArrayBlockingQueue<BaseSlot::call_rec, 8,
+                              interprocess_mutex,
+                              interprocess_condition>;
+
 class Scoreboard
 {
 public:
@@ -235,17 +254,32 @@ public:
     RaftConfig        config;
     
     // TODO: look at using boost::interprocess::message_queue
-    queue::ArrayBlockingQueue<BaseSlot::call_rec, 8,
-                              interprocess_mutex,
-                              interprocess_condition> api_queue;
-
-    queue::ArrayBlockingQueue<BaseSlot::call_rec, 8,
-                              interprocess_mutex,
-                              interprocess_condition> fsm_queue;
+    CallQueue api_queue;
+    CallQueue fsm_queue;
 
     Scoreboard(Scoreboard&) = delete;
     Scoreboard& operator=(Scoreboard&) = delete;
 };
+
+template <typename Call, typename... Args>
+typename Call::slot_t* send_request(CallQueue& queue, Args... argv)
+{
+    auto start_t = Timings::clock::now();
+    auto* slot = shm.construct< typename Call::slot_t >(anonymous_instance)
+        (Call::tag, argv...);
+    auto built_t = Timings::clock::now();
+    slot->timings = Timings(start_t);
+    slot->timings.record("constructed", built_t);
+    queue.put(slot->rec());
+    return slot;
+}
+
+template <typename Call, typename... Args>
+typename Call::slot_t* send_api_request(Args... argv)
+{
+    return send_request<Call, Args...>(scoreboard->api_queue, argv...);
+}
+
 
 bool in_shm_bounds(void* ptr);
 

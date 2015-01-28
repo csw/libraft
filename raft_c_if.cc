@@ -65,15 +65,8 @@ bool raft_is_leader()
 
 raft_future raft_apply_async(char* cmd, size_t cmd_len, uint64_t timeout_ns)
 {
-    auto start_t = Timings::clock::now();
-    auto* slot = shm.construct< CallSlot<ApplyArgs, true> >(anonymous_instance)
-        (CallTag::Apply, cmd, cmd_len, timeout_ns);
-    zlog_debug(msg_cat, "Allocated call slot at %p.", slot);
-    slot->timings = Timings(start_t);
-    slot->timings.record("constructed");
-    scoreboard->api_queue.put(slot->rec());
-    
-    return (raft_future) slot;
+    return (raft_future)
+        send_api_request<api::Apply>(cmd, cmd_len, timeout_ns);
 }
 
 RaftError raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns, void **res)
@@ -86,34 +79,22 @@ RaftError raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns, void **res)
 
 raft_future raft_snapshot()
 {
-    auto* slot = shm.construct< CallSlot<NoArgs, false> >(anonymous_instance)
-        (CallTag::Snapshot);
-    scoreboard->api_queue.put(slot->rec());
-    return (raft_future) slot;
+    return (raft_future) send_api_request<api::Snapshot>();
 }
 
 raft_future raft_add_peer(const char *host, uint16_t port)
 {
-    auto* slot = shm.construct< CallSlot<NetworkAddr, false> >(anonymous_instance)
-        (CallTag::AddPeer, host, port);
-    scoreboard->api_queue.put(slot->rec());
-    return (raft_future) slot;
+    return (raft_future) send_api_request<api::AddPeer>(host, port);
 }
 
 raft_future raft_remove_peer(const char *host, uint16_t port)
 {
-    auto* slot = shm.construct< CallSlot<NetworkAddr, false> >(anonymous_instance)
-        (CallTag::RemovePeer, host, port);
-    scoreboard->api_queue.put(slot->rec());
-    return (raft_future) slot;
+    return (raft_future) send_api_request<api::RemovePeer>(host, port);
 }
 
 raft_future raft_shutdown()
 {
-    auto* slot = shm.construct< CallSlot<NoArgs, false> >(anonymous_instance)
-        (CallTag::Shutdown);
-    scoreboard->api_queue.put(slot->rec());
-    return (raft_future) slot;
+    return (raft_future) send_api_request<api::Shutdown>();
 }
 
 RaftError raft_future_wait(raft_future f)
