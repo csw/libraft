@@ -8,11 +8,15 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "zlog/src/zlog.h"
+
 #include "raft_c_if.h"
 
 typedef uint32_t* fsm_result_t;
 
 const static uint32_t BUFSIZE = 256;
+
+static zlog_category_t *cat;
 
 static uint32_t letter_count = 0;
 static bool snapshot_running = false;
@@ -44,15 +48,15 @@ fsm_result_t update_count(const char *buf, size_t len)
 
     uint32_t *result = malloc(sizeof(uint32_t)); // yeah, yeah, it's 4
     assert(result);
-    fprintf(stderr, "Allocated result object @ %p\n", result);
+    zlog_debug(cat, "Allocated result object @ %p\n", result);
     *result = letter_count;
     return result;
 }
 
 void* FSMApply(uint64_t index, uint64_t term, RaftLogType type, char *cmd, size_t len)
 {
-    printf("FSM: applying command (%lu bytes @ %p): %s\n",
-           len, cmd, cmd);
+    zlog_info(cat, "FSM: applying command (%lu bytes @ %p): %s",
+              len, cmd, cmd);
     return update_count(cmd, len);
 }
 
@@ -100,7 +104,7 @@ void* run_snapshot(void *params_v)
     snapshot_running = true;
     bool success = false;
 
-    fprintf(stderr, "Writing snapshot to %s.\n", params->path);
+    zlog_info(cat, "Writing snapshot to %s.", params->path);
     FILE *sink = fopen(params->path, "w");
     if (sink) {
         int chars = fprintf(sink, "%u\n", params->count);
@@ -152,6 +156,8 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Raft client starting.\n");
     
     raft_init(&fsm_def, argc, argv);
+    cat = zlog_get_category("client");
+    
 
     parse_opts(argc, argv);
     printf("%u runs, snapshot period %u.\n", runs, snapshot_period);
@@ -168,7 +174,7 @@ int main(int argc, char *argv[])
 
     for (int i = 1; i <= runs; ++i) {
         char* buf = alloc_raft_buffer(BUFSIZE);
-        fprintf(stderr, "Allocated cmd buffer at %p.\n", buf);
+        zlog_debug(cat, "Allocated cmd buffer at %p.", buf);
         snprintf(buf, BUFSIZE, "Raft command #%d", i);
         raft_future f = raft_apply_async(buf, BUFSIZE, 0);
         RaftError err = raft_future_wait(f);

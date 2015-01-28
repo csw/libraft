@@ -19,6 +19,8 @@
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 
+#include "zlog/src/zlog.h"
+
 #include "queue.h"
 #include "raft_defs.h"
 #include "raft_c_if.h"
@@ -40,6 +42,10 @@ class Scoreboard;
 // TODO: add knobs for these
 const static char SHM_PATH[] = "/tmp/raft_shm";
 const static size_t SHM_SIZE = 64 * 1024 * 1024;
+
+extern zlog_category_t*    msg_cat;
+extern zlog_category_t*    fsm_cat;
+extern zlog_category_t*    shm_cat;
 
 extern pid_t               raft_pid;
 extern managed_mapped_file shm;

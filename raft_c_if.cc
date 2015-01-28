@@ -51,9 +51,9 @@ pid_t raft_init(RaftFSM *fsm_, int argc, char *argv[])
 
     fsm = fsm_;
     raft::run_raft();
-    fprintf(stderr, "Started Raft process: pid %d.\n", raft_pid);
+    zlog_info(shm_cat, "Started Raft process: pid %d.", raft_pid);
     raft::scoreboard->wait_for_raft(raft_pid);
-    fprintf(stderr, "Raft is running.\n");
+    zlog_debug(shm_cat, "Raft is running.");
     start_fsm_worker(fsm);
     return raft_pid;
 }
@@ -68,7 +68,7 @@ raft_future raft_apply_async(char* cmd, size_t cmd_len, uint64_t timeout_ns)
     auto start_t = Timings::clock::now();
     auto* slot = shm.construct< CallSlot<ApplyArgs, true> >(anonymous_instance)
         (CallTag::Apply, cmd, cmd_len, timeout_ns);
-    fprintf(stderr, "Allocated call slot at %p.\n", slot);
+    zlog_debug(msg_cat, "Allocated call slot at %p.", slot);
     slot->timings = Timings(start_t);
     slot->timings.record("constructed");
     scoreboard->api_queue.put(slot->rec());
@@ -80,7 +80,7 @@ RaftError raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns, void **res)
 {
     raft_future f = raft_apply_async(cmd, cmd_len, timeout_ns);
     raft_future_wait(f);
-    fprintf(stderr, "Result of call %p is ready.\n", f);
+    zlog_debug(msg_cat, "Result of call %p is ready.", f);
     return raft_future_get_ptr(f, res);
 }
 
@@ -151,7 +151,7 @@ void start_fsm_worker(RaftFSM* fsm)
 
 void run_fsm_worker(RaftFSM* fsm)
 {
-    fprintf(stderr, "FSM worker starting.\n");
+    zlog_debug(fsm_cat, "FSM worker starting.\n");
     
     for (;;) {
         auto rec = scoreboard->fsm_queue.take();
@@ -159,8 +159,8 @@ void run_fsm_worker(RaftFSM* fsm)
         BaseSlot::pointer slot = rec.second;
         raft::mutex_lock l(slot->owned);
         slot->timings.record("FSM call received");
-        fprintf(stderr, "FSM call received, tag %d, call %p.\n",
-                tag, rec.second.get());
+        zlog_debug(msg_cat, "FSM call received, tag %d, call %p.",
+                   tag, rec.second.get());
         assert(slot->state == raft::CallState::Pending);
 
         switch (tag) {
@@ -176,8 +176,7 @@ void run_fsm_worker(RaftFSM* fsm)
             dispatch_fsm_restore((CallSlot<Filename, false>&) *slot);
             break;
         default:
-            fprintf(stderr, "Unhandled call type: %d\n",
-                    tag);
+            zlog_fatal(msg_cat, "Unhandled call type: %d", tag);
             abort();
         }
     }
@@ -192,16 +191,16 @@ void dispatch_fsm_apply(CallSlot<LogEntry, true>& slot)
         dispatch_fsm_apply_cmd(slot);
         break;
     case RAFT_LOG_NOOP:
-        fprintf(stderr, "FSM command: noop\n");
+        zlog_info(msg_cat, "FSM command: noop");
         break;
     case RAFT_LOG_ADD_PEER:
-        fprintf(stderr, "FSM command: add peer\n");
+        zlog_info(msg_cat, "FSM command: add peer");
         break;
     case RAFT_LOG_REMOVE_PEER:
-        fprintf(stderr, "FSM command: remove peer\n");
+        zlog_info(msg_cat, "FSM command: remove peer");
         break;
     case RAFT_LOG_BARRIER:
-        fprintf(stderr, "FSM command: barrier\n");
+        zlog_info(msg_cat, "FSM command: barrier");
         break;
     }
 }
@@ -211,13 +210,13 @@ void dispatch_fsm_apply_cmd(CallSlot<LogEntry, true>& slot)
     LogEntry& log = slot.args;
     assert(log.data_buf);
     char* data_buf = (char*) raft::shm.get_address_from_handle(log.data_buf);
-    fprintf(stderr, "Found command buffer at %p.\n", data_buf);
+    zlog_debug(fsm_cat, "Found command buffer at %p.", data_buf);
     slot.state = CallState::Dispatched;
     slot.timings.record("FSM call dispatched");
     void* response =
         fsm->apply(log.index, log.term, log.log_type, data_buf, log.data_len);
     slot.timings.record("FSM command applied");
-    fprintf(stderr, "FSM response @ %p\n", response);
+    zlog_debug(fsm_cat, "FSM response @ %p", response);
     slot.reply((uintptr_t) response);
 }
 

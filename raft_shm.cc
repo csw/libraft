@@ -31,6 +31,11 @@ void report_process_status(const char *desc, pid_t pid, int status);
 
 }
 
+zlog_category_t*    msg_cat;
+zlog_category_t*    fsm_cat;
+zlog_category_t*    shm_cat;
+bool                msg_timing = false;
+
 pid_t               raft_pid;
 managed_mapped_file shm;
 Scoreboard*         scoreboard;
@@ -132,6 +137,13 @@ void process_args(int argc, char *argv[])
 
 void shm_init(const char* name, bool create)
 {
+    if (zlog_init("zlog.conf")) {
+        fprintf(stderr, "zlog init failed\n");
+    }
+    msg_cat = zlog_get_category("raft_msg");
+    fsm_cat = zlog_get_category("raft_fsm");
+    shm_cat = zlog_get_category("raft_shm");
+
     // register on-exit callback to call remove()?
     if (create) {
         // client side
@@ -148,14 +160,12 @@ void shm_init(const char* name, bool create)
         shm = managed_mapped_file(boost::interprocess::create_only, 
                                   SHM_PATH, SHM_SIZE);
         scoreboard = shm.construct<Scoreboard>(unique_instance)();
-        fprintf(stderr, "[%d]: Initialized shared memory and scoreboard.\n",
-                getpid());
+        zlog_debug(shm_cat, "Initialized shared memory and scoreboard.");
     } else {
         // Raft side
         shm = managed_mapped_file(boost::interprocess::open_only,
                                   SHM_PATH);
-        fprintf(stderr, "[%d]: Opened shared memory.\n",
-                getpid());
+        zlog_debug(shm_cat, "Opened shared memory.");
         // unlink the file after we've mapped it, nobody else will need it
         // XXX: add option to leave it for debugging?
         if (unlink(SHM_PATH) == -1) {
@@ -166,11 +176,10 @@ void shm_init(const char* name, bool create)
         auto ret = shm.find<Scoreboard>(unique_instance);
         scoreboard = ret.first;
         assert(scoreboard);
-        fprintf(stderr, "[%d]: Found scoreboard.\n",
-                getpid());
+        zlog_debug(shm_cat, "Found scoreboard.");
     }
-    fprintf(stderr, "[%d]: Mapped shared memory at base address %p.\n",
-            getpid(), raft::shm.get_address());
+    zlog_debug(shm_cat, "Mapped shared memory at base address %p.",
+               raft::shm.get_address());
 }
 
 pid_t run_raft()
@@ -265,11 +274,13 @@ std::vector<const char*> build_raft_argv(RaftConfig cfg)
     }
     args.push_back(nullptr);
 
+    /*
     fprintf(stderr, "Raft argv: ");
     for (const char* arg : args) {
         fprintf(stderr, "%s ", arg);
     }
     fprintf(stderr, "\n");
+    */
     return args;
 }
 
@@ -335,8 +346,11 @@ void Timings::record(const char *tag, time_point t)
 
 void Timings::print()
 {
+    if (!msg_timing)
+        return;
+
     if (n_entries <= 1) {
-        fprintf(stderr, "No timing data!\n");
+        zlog_warn(msg_cat, "No timing data!");
         return;
     }
     
