@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "zlog/src/zlog.h"
@@ -24,6 +25,7 @@ static pthread_t snapshot_thread;
 
 static unsigned runs = 20;
 static unsigned snapshot_period = 0;
+static bool     interactive = false;
 
 struct snapshot_params {
     const char       *path;
@@ -33,6 +35,11 @@ struct snapshot_params {
 
 void  parse_opts(int argc, char *argv[]);
 void* run_snapshot(void *params_v);
+
+void  run_auto();
+void  run_interactive();
+void  send_command(char* raft_buf);
+void  take_snapshot();
 
 fsm_result_t update_count(const char *buf, size_t len)
 {
@@ -84,7 +91,7 @@ void FSMBeginSnapshot(const char *path, raft_snapshot_req s)
 void parse_opts(int argc, char *argv[])
 {
     while (true) {
-        int c = getopt(argc, argv, "n:s:");
+        int c = getopt(argc, argv, "n:s:i");
         if (c == -1)
             break;
         switch (c) {
@@ -93,6 +100,9 @@ void parse_opts(int argc, char *argv[])
             break;
         case 's':
             snapshot_period = strtoul(optarg, NULL, 10);
+            break;
+        case 'i':
+            interactive = true;
             break;
         }
     }
@@ -138,6 +148,7 @@ int FSMRestore(const char *path)
         }
         if (scanned == 1) {
             fprintf(stderr, "Read snapshot state: %u\n", val);
+            letter_count = val;
             return 0;
         } else {
             fprintf(stderr, "Reading snapshot failed.\n");
@@ -149,59 +160,101 @@ int FSMRestore(const char *path)
     }
 }
 
-RaftFSM fsm_def = { &FSMApply, &FSMBeginSnapshot, &FSMRestore };
-
-int main(int argc, char *argv[])
+void run_auto()
 {
-    fprintf(stderr, "Raft client starting.\n");
-    
-    raft_init(&fsm_def, argc, argv);
-    cat = zlog_get_category("client");
-    
-
-    parse_opts(argc, argv);
     printf("%u runs, snapshot period %u.\n", runs, snapshot_period);
-
-    /*
-    if (argc > 1) {
-        runs = atoi(argv[1]);
-    }
-    */
-    
-    while (! raft_is_leader()) {
-        sleep(1);
-    }
 
     for (int i = 1; i <= runs; ++i) {
         char* buf = alloc_raft_buffer(BUFSIZE);
         zlog_debug(cat, "Allocated cmd buffer at %p.", buf);
         snprintf(buf, BUFSIZE, "Raft command #%d", i);
-        raft_future f = raft_apply_async(buf, BUFSIZE, 0);
-        RaftError err = raft_future_wait(f);
-        if (!err) {
-            fsm_result_t cur_count_p = NULL;
-            raft_future_get_ptr(f, (void**)&cur_count_p);
-            assert(cur_count_p);
-            printf("FSM state: letter count %u.\n", *cur_count_p);
-            free(cur_count_p);
-        } else {
-            fprintf(stderr, "Raft error: %s\n", raft_err_msg(err));
-        }
-        raft_future_dispose(f);
-        free_raft_buffer(buf);
+        send_command(buf);
+
         sleep(1);
 
         if (snapshot_period && i % snapshot_period == 0) {
-            printf("Requesting snapshot.\n");
-            raft_future sf = raft_snapshot();
-            RaftError err = raft_future_wait(sf);
-            if (!err) {
-                printf("Snapshot complete.\n");
-            } else {
-                printf("Snapshot failed.\n");
-            }
-            raft_future_dispose(sf);
+            take_snapshot();
         }
+    }
+}
+
+void run_interactive()
+{
+    for (;;) {
+        printf("text, [S]napshot, or [Q]uit?\n");
+        char line[256];
+        char *res = fgets(line, 256, stdin);
+        if (!res) {
+            if (ferror(stdin)) {
+                zlog_error(cat, "Failed to read line!");
+            }
+            return;
+        }
+
+        char* nl = memchr(line, '\n', 255);
+        if (nl)
+            *nl = '\0';
+
+        if (strncasecmp("S", line, 256) == 0) {
+            take_snapshot();
+        } else if (strncasecmp("Q", line, 256) == 0) {
+            return;
+        } else {
+            char* buf = alloc_raft_buffer(BUFSIZE);
+            strncpy(buf, line, 255);
+            send_command(buf);
+        }
+    }
+}
+
+void send_command(char* buf)
+{
+    raft_future f = raft_apply_async(buf, BUFSIZE, 0);
+    RaftError err = raft_future_wait(f);
+    if (!err) {
+        fsm_result_t cur_count_p = NULL;
+        raft_future_get_ptr(f, (void**)&cur_count_p);
+        assert(cur_count_p);
+        printf("FSM state: letter count %u.\n", *cur_count_p);
+        free(cur_count_p);
+    } else {
+        fprintf(stderr, "Raft error: %s\n", raft_err_msg(err));
+    }
+    raft_future_dispose(f);
+    free_raft_buffer(buf);
+}
+
+void take_snapshot()
+{
+    printf("Requesting snapshot.\n");
+    raft_future sf = raft_snapshot();
+    RaftError err = raft_future_wait(sf);
+    if (!err) {
+        printf("Snapshot complete.\n");
+    } else {
+        printf("Snapshot failed.\n");
+    }
+    raft_future_dispose(sf);
+}
+
+RaftFSM fsm_def = { &FSMApply, &FSMBeginSnapshot, &FSMRestore };
+
+int main(int argc, char *argv[])
+{
+    fprintf(stderr, "Raft client starting.\n");
+    raft_init(&fsm_def, argc, argv);
+    cat = zlog_get_category("client");
+
+    parse_opts(argc, argv);
+
+    while (! raft_is_leader()) {
+        sleep(1);
+    }
+
+    if (interactive) {
+        run_interactive();
+    } else {
+        run_auto();
     }
 
     raft_future sf = raft_shutdown();
