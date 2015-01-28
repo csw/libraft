@@ -229,6 +229,8 @@ void dispatch_fsm_snapshot(CallSlot<Filename, false>& slot)
 void dispatch_fsm_restore(CallSlot<Filename, false>& slot)
 {
     assert(strlen(slot.args.path) > 0);
+    zlog_info(fsm_cat, "Passing restore request to FSM, path %s.",
+              slot.args.path);
     int result = fsm->restore(slot.args.path);
     slot.reply(result == 0 ? RAFT_SUCCESS : RAFT_E_OTHER);
 }
