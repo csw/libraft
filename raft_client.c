@@ -23,9 +23,10 @@ static uint32_t letter_count = 0;
 static bool snapshot_running = false;
 static pthread_t snapshot_thread;
 
-static unsigned runs = 20;
-static unsigned snapshot_period = 0;
-static bool     interactive = false;
+static unsigned   runs = 20;
+static unsigned   snapshot_period = 0;
+static useconds_t sleep_us = 1000 * 1000;
+static bool       interactive = false;
 
 struct snapshot_params {
     const char       *path;
@@ -91,7 +92,7 @@ void FSMBeginSnapshot(const char *path, raft_snapshot_req s)
 void parse_opts(int argc, char *argv[])
 {
     while (true) {
-        int c = getopt(argc, argv, "n:s:i");
+        int c = getopt(argc, argv, "n:s:w:i");
         if (c == -1)
             break;
         switch (c) {
@@ -100,6 +101,9 @@ void parse_opts(int argc, char *argv[])
             break;
         case 's':
             snapshot_period = strtoul(optarg, NULL, 10);
+            break;
+        case 'w':
+            sleep_us = strtoul(optarg, NULL, 10);
             break;
         case 'i':
             interactive = true;
@@ -170,7 +174,7 @@ void run_auto()
         snprintf(buf, BUFSIZE, "Raft command #%d", i);
         send_command(buf);
 
-        sleep(1);
+        usleep(sleep_us);
 
         if (snapshot_period && i % snapshot_period == 0) {
             take_snapshot();
