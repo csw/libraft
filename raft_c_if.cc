@@ -3,6 +3,7 @@
 #include <sys/types.h>
 
 #include <chrono>
+#include <deque>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -22,6 +23,24 @@ static void dispatch_fsm_apply(api::FSMApply::slot_t& slot);
 static void dispatch_fsm_apply_cmd(api::FSMApply::slot_t& slot);
 static void dispatch_fsm_snapshot(api::FSMSnapshot::slot_t& slot);
 static void dispatch_fsm_restore(api::FSMRestore::slot_t& slot);
+
+namespace {
+
+struct SnapshotJob {
+    api::FSMSnapshot::slot_t* slot;
+    raft_fsm_snapshot_handle  handle;
+    raft_fsm_snapshot_func    func;
+};
+
+std::deque<SnapshotJob> snapshot_jobs;
+std::mutex              snapshot_mutex;
+std::condition_variable snapshot_available;
+std::thread             snapshot_worker;
+
+void run_snapshot_worker();
+void run_snapshot_job(const SnapshotJob& job);
+
+}
 
 static void init_err_msgs();
 static RaftFSM*    fsm;
@@ -68,11 +87,18 @@ pid_t raft_init(RaftFSM *fsm_, const RaftConfig *config_arg)
 void raft_cleanup()
 {
     zlog_debug(fsm_cat, "Canceling FSM worker thread.");
-    if (fsm_worker.get_id() != std::thread::id()) {
+    if (fsm_worker.joinable()) {
         if (pthread_cancel(fsm_worker.native_handle())) {
             perror("Failed to cancel FSM worker thread");
         }
         fsm_worker.join();
+    }
+    // TODO: look into cancellation behavior further
+    if (snapshot_worker.joinable()) {
+        if (pthread_cancel(snapshot_worker.native_handle())) {
+            perror("Failed to cancel snapshot worker thread");
+        }
+        snapshot_worker.join();
     }
     raft::shm_cleanup();
 }
@@ -149,8 +175,16 @@ void raft_future_dispose(raft_future f)
 void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success)
 {
     auto slot = (api::FSMSnapshot::slot_t*) s;
-    raft::mutex_lock l(slot->owned);
-    slot->reply(success ? RAFT_SUCCESS : RAFT_E_OTHER);
+    {
+        raft::mutex_lock l(slot->owned);
+        slot->reply(success ? RAFT_SUCCESS : RAFT_E_OTHER);
+    }
+
+    if (success) {
+        zlog_info(fsm_cat, "Snapshot succeeded.");
+    } else {
+        zlog_error(fsm_cat, "Snapshot failed!");
+    }
 }
 
 void start_fsm_worker(RaftFSM* fsm)
@@ -244,6 +278,64 @@ void dispatch_fsm_restore(api::FSMRestore::slot_t& slot)
               slot.args.path);
     int result = fsm->restore(slot.args.path);
     slot.reply(result == 0 ? RAFT_SUCCESS : RAFT_E_OTHER);
+}
+
+void raft_fsm_take_snapshot(raft_snapshot_req req,
+                            raft_fsm_snapshot_handle h,
+                            raft_fsm_snapshot_func f)
+{
+    assert(req);
+    assert(h);
+    assert(f);
+
+    auto* slot = (api::FSMSnapshot::slot_t*) req;
+    std::unique_lock<decltype(snapshot_mutex)> lock(snapshot_mutex);
+    if (! snapshot_worker.joinable()) {
+        snapshot_worker = std::thread(run_snapshot_worker);
+    }
+    snapshot_jobs.push_back(SnapshotJob { slot, h, f });
+    snapshot_available.notify_one();
+}
+
+namespace {
+
+void run_snapshot_worker()
+{
+    for (;;) {
+        std::unique_lock<decltype(snapshot_mutex)> lock(snapshot_mutex);
+        while (snapshot_jobs.empty())
+            snapshot_available.wait(lock);
+        const SnapshotJob job = snapshot_jobs.front();
+        snapshot_jobs.pop_front();
+        lock.unlock();
+        run_snapshot_job(job);
+    }
+}
+
+void run_snapshot_job(const SnapshotJob& job)
+{
+    bool success = false;
+
+    zlog_info(fsm_cat, "Writing snapshot to %s.", job.slot->args.path);
+    FILE *sink = fopen(job.slot->args.path, "w");
+    if (sink) {
+        int rc = (*job.func)(job.handle, sink);
+        zlog_debug(fsm_cat, "Client snapshot function returned %d.", rc);
+        success = (rc == 0);
+
+        if (fclose(sink) != 0) {
+            zlog_error(fsm_cat, "Closing snapshot pipe failed: %s",
+                       strerror(errno));
+            success = false;
+        }
+    } else {
+        zlog_error(fsm_cat, "Opening snapshot pipe failed: %s",
+                   strerror(errno));
+    }
+
+    raft_fsm_snapshot_complete(job.slot, success);
+}
+
 }
 
 char* alloc_raft_buffer(size_t len)

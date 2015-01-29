@@ -1,7 +1,6 @@
 #include <assert.h>
 #include <ctype.h>
 #include <getopt.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -19,28 +18,22 @@ const static uint32_t BUFSIZE = 256;
 
 static zlog_category_t *cat;
 
-static uint32_t  letter_count = 0;
-static bool      snapshot_running = false;
-static pthread_t snapshot_thread;
+static uint32_t   letter_count = 0;
 
 static unsigned   runs = 20;
 static unsigned   snapshot_period = 0;
 static useconds_t sleep_us = 1000 * 1000;
 static bool       interactive = false;
 
-struct snapshot_params {
-    const char       *path;
-    uint32_t          count;
-    raft_snapshot_req req;
-};
-
 void  parse_opts(int argc, char *argv[]);
-void* run_snapshot(void *params_v);
+int   write_snapshot(raft_fsm_snapshot_handle handle, FILE* sink);
 
 void  run_auto();
 void  run_interactive();
 void  send_command(char* raft_buf);
 void  take_snapshot();
+
+// FSM
 
 fsm_result_t update_count(const char *buf, size_t len)
 {
@@ -70,74 +63,14 @@ void* FSMApply(uint64_t index, uint64_t term, RaftLogType type, char *cmd, size_
 
 void FSMBeginSnapshot(const char *path, raft_snapshot_req s)
 {
-    if (!snapshot_running) {
-        struct snapshot_params *params = malloc(sizeof(struct snapshot_params));
-        if (!params) {
-            perror("malloc failed");
-            exit(1);
-        }
-        params->path = path;
-        params->count = letter_count;
-        params->req = s;
-        if (pthread_create(&snapshot_thread, NULL, run_snapshot, params)) {
-            perror("Failed to create snapshot thread");
-            raft_fsm_snapshot_complete(s, false);
-        }
-    } else {
-        fprintf(stderr, "Snapshot already in progress!\n");
-        raft_fsm_snapshot_complete(s, false);
+    uint32_t *state = malloc(sizeof(uint32_t));
+    if (!state) {
+        perror("malloc failed");
+        exit(1);
     }
-}
+    *state = letter_count;
 
-void parse_opts(int argc, char *argv[])
-{
-    while (true) {
-        int c = getopt(argc, argv, "n:s:w:i");
-        if (c == -1)
-            break;
-        switch (c) {
-        case 'n':
-            runs = strtoul(optarg, NULL, 10);
-            break;
-        case 's':
-            snapshot_period = strtoul(optarg, NULL, 10);
-            break;
-        case 'w':
-            sleep_us = strtoul(optarg, NULL, 10);
-            break;
-        case 'i':
-            interactive = true;
-            break;
-        }
-    }
-}
-
-void* run_snapshot(void *params_v)
-{
-    struct snapshot_params *params = (struct snapshot_params *)params_v;
-    snapshot_running = true;
-    bool success = false;
-
-    zlog_info(cat, "Writing snapshot to %s.", params->path);
-    FILE *sink = fopen(params->path, "w");
-    if (sink) {
-        int chars = fprintf(sink, "%u\n", params->count);
-        if (chars < 0)
-            perror("Writing snapshot failed");
-
-        if (fclose(sink) == 0) {
-            success = (chars > 0);
-        } else {
-            perror("Closing snapshot pipe failed");
-        }
-    } else {
-        perror("Opening snapshot pipe failed");
-    }
-
-    raft_fsm_snapshot_complete(params->req, success);
-    free(params);
-    snapshot_running = false;
-    return NULL;
+    raft_fsm_take_snapshot(s, (raft_fsm_snapshot_handle) state, &write_snapshot);
 }
 
 int FSMRestore(const char *path)
@@ -161,6 +94,47 @@ int FSMRestore(const char *path)
     } else {
         perror("Opening snapshot pipe failed");
         return 1;
+    }
+}
+
+int write_snapshot(raft_fsm_snapshot_handle handle, FILE* sink)
+{
+    uint32_t *state = (uint32_t*) handle;
+    int result;
+    int chars = fprintf(sink, "%u\n", *state);
+    if (chars < 0) {
+        perror("Writing snapshot failed");
+        result = 1;
+    } else {
+        result = 0;
+    }
+    free(state);
+    return result;
+}
+
+
+// Client code
+
+void parse_opts(int argc, char *argv[])
+{
+    while (true) {
+        int c = getopt(argc, argv, "n:s:w:i");
+        if (c == -1)
+            break;
+        switch (c) {
+        case 'n':
+            runs = strtoul(optarg, NULL, 10);
+            break;
+        case 's':
+            snapshot_period = strtoul(optarg, NULL, 10);
+            break;
+        case 'w':
+            sleep_us = strtoul(optarg, NULL, 10);
+            break;
+        case 'i':
+            interactive = true;
+            break;
+        }
     }
 }
 

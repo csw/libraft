@@ -48,6 +48,21 @@ typedef struct raft_fsm {
 
 void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success);
 
+// Optional snapshot support
+
+typedef void* raft_fsm_snapshot_handle;
+
+/**
+ * Callback function for writing a snapshot from the state handle.
+ *
+ * Must not close the supplied sink.
+ */
+typedef int (*raft_fsm_snapshot_func)(raft_fsm_snapshot_handle handle, FILE* sink);
+
+void raft_fsm_take_snapshot(raft_snapshot_req req,
+                            raft_fsm_snapshot_handle h,
+                            raft_fsm_snapshot_func f);
+
 // Top half; client side
 
 RaftError raft_parse_argv(int argc, char *argv[], RaftConfig *cfg);
