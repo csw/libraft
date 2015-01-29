@@ -27,7 +27,7 @@ zlog_lib := zlog/src/libzlog.a
 all: libraft.a raft_client $(GO_PROG)
 
 run_client: raft_client $(GO_PROG)
-	./raft_client
+	./raft_client --single -n 10
 
 $(GO_PROG): $(GO_DIR)/raft_if.go $(GO_DIR)/raft_go_if.h $(GO_DIR)/raft_go_if.cc \
            libraft.a
