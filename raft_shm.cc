@@ -2,8 +2,10 @@
 #include <getopt.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <string>
 #include <sys/wait.h>
+
+#include <list>
+#include <string>
 
 #include "raft_shm.h"
 
@@ -37,10 +39,15 @@ const struct option LONG_OPTS[] = {
 
 RaftConfig config;
 
+std::mutex orphan_mutex;
+std::list<BaseSlot*> orphaned_calls;
+
 std::thread raft_watcher;
+std::thread orphan_gc_thread;
 
 std::vector<const char*> build_raft_argv(RaftConfig cfg);
 void watch_raft_proc(pid_t raft_pid);
+void run_orphan_gc();
 void report_process_status(const char *desc, pid_t pid, int status);
 void init_client_allocators();
 void init_raft_allocators();
@@ -116,6 +123,39 @@ bool in_shm_bounds(void* ptr)
     char* base = (char*) shm.get_address();
     char* cptr = (char*) ptr;
     return (cptr >= base) && (cptr < base + shm.get_size());
+}
+
+void track_orphan(BaseSlot* slot)
+{
+    std::unique_lock<std::mutex> orphan_lock(orphan_mutex);
+    orphaned_calls.push_back(slot);
+}
+
+namespace {
+
+void run_orphan_gc()
+{
+    for (;;) {
+        {
+            std::unique_lock<std::mutex> orphan_lock(orphan_mutex);
+            for (auto slot_i = orphaned_calls.begin();
+                 slot_i != orphaned_calls.end();) {
+                auto& slot = **slot_i;
+                std::unique_lock<decltype(slot.owned)>
+                    slot_lock(slot.owned, std::try_to_lock);
+
+                if (slot_lock && is_terminal(slot.state)) {
+                    slot.dispose();
+                    slot_i = orphaned_calls.erase(slot_i);
+                } else {
+                    ++slot_i;
+                }
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+}
+
 }
 
 void process_args(int argc, char *argv[])
@@ -207,6 +247,13 @@ void shm_init(const char* name, bool create)
 
 void shm_cleanup()
 {
+    if (orphan_gc_thread.joinable()) {
+        if (pthread_cancel(orphan_gc_thread.native_handle())) {
+            perror("Failed to cancel orphan GC thread");
+        }
+        orphan_gc_thread.join();
+    }
+    
     if (raft_watcher.joinable())
         raft_watcher.join();
 }
@@ -223,6 +270,9 @@ pid_t run_raft()
         // start the watcher thread
         assert(raft_watcher.get_id() == std::thread::id());
         raft_watcher = std::thread(watch_raft_proc, raft_pid);
+        // start the call GC thread
+        assert(orphan_gc_thread.get_id() == std::thread::id());
+        orphan_gc_thread = std::thread(run_orphan_gc);
         return kidpid;
     } else {
         // child

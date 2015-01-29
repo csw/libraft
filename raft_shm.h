@@ -294,6 +294,8 @@ typename Call::slot_t* send_fsm_request(Args... argv)
 
 bool in_shm_bounds(void* ptr);
 
+void track_orphan(BaseSlot* slot);
+
 void process_args(int argc, char *argv[]);
 
 /**
