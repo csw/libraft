@@ -44,14 +44,26 @@ const char* raft_err_msg(RaftError err)
     }
 }
 
-pid_t raft_init(RaftFSM *fsm_, int argc, char *argv[])
+RaftError raft_parse_argv(int argc, char *argv[], RaftConfig *cfg)
+{
+    if (!cfg || !argv)
+        return RAFT_E_INVALID_ADDRESS;
+    return raft::parse_argv(argc, argv, *cfg);
+}
+
+pid_t raft_init(RaftFSM *fsm_, const RaftConfig *config_arg)
 {
     init_err_msgs();
-    raft::process_args(argc, argv);
+    RaftConfig config;
+    if (config_arg) {
+        config = *config_arg;
+    } else {
+        config = raft::default_config();
+    }
     raft::shm_init("raft", true);
 
     fsm = fsm_;
-    raft::run_raft();
+    raft::run_raft(config);
     zlog_info(shm_cat, "Started Raft process: pid %d.", raft_pid);
     start_fsm_worker(fsm);
     raft::scoreboard->wait_for_raft(raft_pid);

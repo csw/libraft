@@ -37,15 +37,13 @@ const struct option LONG_OPTS[] = {
     { "",         0,                 NULL, 0   }
 };
 
-RaftConfig config;
-
 std::mutex orphan_mutex;
 std::list<BaseSlot*> orphaned_calls;
 
 std::thread raft_watcher;
 std::thread orphan_gc_thread;
 
-std::vector<const char*> build_raft_argv(RaftConfig cfg);
+std::vector<const char*> build_raft_argv(const RaftConfig& cfg);
 void watch_raft_proc(pid_t raft_pid);
 void run_orphan_gc();
 void report_process_status(const char *desc, pid_t pid, int status);
@@ -158,12 +156,9 @@ void run_orphan_gc()
 
 }
 
-void process_args(int argc, char *argv[])
+RaftError parse_argv(int argc, char *argv[], RaftConfig &cfg)
 {
-    config.base_dir[0] = '\0';
-    config.peers[0] = '\0';
-    config.listen_port = 0;
-    config.single_node = false;
+    cfg = default_config();
 
     int opterr_old = opterr;
     opterr = 0;
@@ -175,25 +170,36 @@ void process_args(int argc, char *argv[])
             break;
         switch (c) {
         case 'd': // Raft dir
-            strncpy(config.base_dir, optarg, 255);
+            strncpy(cfg.base_dir, optarg, 255);
             break;
         case 'p': // port
-            config.listen_port = atoi(optarg);
+            cfg.listen_port = atoi(optarg);
             break;
         case 's': // single-node
-            config.single_node = true;
+            cfg.single_node = true;
             break;
         case 'P': // peers
-            strncpy(config.peers, optarg, 255);
+            strncpy(cfg.peers, optarg, 255);
             break;
         case '?': // unknown arg
             opterr = opterr_old;
             optind = optind-1;
-            return;
+            return RAFT_SUCCESS;
         }
     }
 
     opterr = opterr_old;
+    return RAFT_SUCCESS;
+}
+
+RaftConfig default_config()
+{
+    RaftConfig cfg;
+    cfg.base_dir[0] = '\0';
+    cfg.peers[0] = '\0';
+    cfg.listen_port = 0;
+    cfg.single_node = false;
+    return cfg;
 }
 
 void shm_init(const char* name, bool create)
@@ -260,7 +266,7 @@ void shm_cleanup()
     shm = decltype(shm)();
 }
 
-pid_t run_raft()
+pid_t run_raft(const RaftConfig& config)
 {
     pid_t kidpid = fork();
     if (kidpid == -1) {
@@ -327,7 +333,7 @@ void BaseSlot::wait()
 
 namespace {
 
-std::vector<const char*> build_raft_argv(RaftConfig cfg)
+std::vector<const char*> build_raft_argv(const RaftConfig& cfg)
 {
     std::vector<const char*> args;
     args.push_back("raft_if");

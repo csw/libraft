@@ -246,7 +246,12 @@ RaftFSM fsm_def = { &FSMApply, &FSMBeginSnapshot, &FSMRestore };
 int main(int argc, char *argv[])
 {
     fprintf(stderr, "Raft client starting.\n");
-    raft_init(&fsm_def, argc, argv);
+    RaftConfig config;
+    if (raft_parse_argv(argc, argv, &config)) {
+        fprintf(stderr, "libraft error parsing args!\n");
+        exit(1);
+    }
+    raft_init(&fsm_def, &config);
     cat = zlog_get_category("client");
 
     parse_opts(argc, argv);

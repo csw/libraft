@@ -296,7 +296,11 @@ bool in_shm_bounds(void* ptr);
 
 void track_orphan(BaseSlot* slot);
 
-void process_args(int argc, char *argv[]);
+// Startup, shutdown, etc.
+
+RaftConfig default_config();
+
+RaftError parse_argv(int argc, char *argv[], RaftConfig &config);
 
 /**
  * Set up shared memory and any resident resources.
@@ -314,7 +318,7 @@ void shm_cleanup();
  *
  * To be called from the client after shm_init().
  */
-pid_t run_raft();
+pid_t run_raft(const RaftConfig& config);
 
 }
 

@@ -50,7 +50,8 @@ void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success);
 
 // Top half; client side
 
-pid_t raft_init(RaftFSM *fsm, int argc, char *argv[]);
+RaftError raft_parse_argv(int argc, char *argv[], RaftConfig *cfg);
+pid_t raft_init(RaftFSM *fsm, const RaftConfig *cfg);
 void raft_cleanup();
 
 bool raft_is_leader();
