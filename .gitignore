@@ -1,6 +1,7 @@
 *.a
 *.o
 *.d
+*.s
 /raft_client
 /perf/
 *.dSYM
