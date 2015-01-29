@@ -256,6 +256,8 @@ void shm_cleanup()
     
     if (raft_watcher.joinable())
         raft_watcher.join();
+
+    shm = decltype(shm)();
 }
 
 pid_t run_raft()
