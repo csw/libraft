@@ -213,12 +213,10 @@ public:
     
     void dispose()
     {
-        
         std::unique_lock<interprocess_mutex> lock(owned);
         if (ret_ready) {
             lock.unlock();
             Call::allocator->deallocate_one(this);
-            //shm.destroy_ptr(this);
         } else {
             assert(false && "not implemented");
         }
