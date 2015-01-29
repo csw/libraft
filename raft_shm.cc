@@ -270,10 +270,10 @@ pid_t run_raft()
         // parent
         raft_pid = kidpid;
         // start the watcher thread
-        assert(raft_watcher.get_id() == std::thread::id());
+        assert(! raft_watcher.joinable());
         raft_watcher = std::thread(watch_raft_proc, raft_pid);
         // start the call GC thread
-        assert(orphan_gc_thread.get_id() == std::thread::id());
+        assert(! orphan_gc_thread.joinable());
         orphan_gc_thread = std::thread(run_orphan_gc);
         return kidpid;
     } else {
