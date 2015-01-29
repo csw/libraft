@@ -27,12 +27,6 @@ static void init_err_msgs();
 static RaftFSM*    fsm;
 static std::thread fsm_worker;
 
-namespace alloc {
-
-//pool_allocator< CallSlot<ApplyArgs, true> > apply;
-
-}
-
 static std::vector<const char*> err_msgs;
 
 const char* raft_err_msg(RaftError err)

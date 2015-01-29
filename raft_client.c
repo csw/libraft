@@ -19,8 +19,8 @@ const static uint32_t BUFSIZE = 256;
 
 static zlog_category_t *cat;
 
-static uint32_t letter_count = 0;
-static bool snapshot_running = false;
+static uint32_t  letter_count = 0;
+static bool      snapshot_running = false;
 static pthread_t snapshot_thread;
 
 static unsigned   runs = 20;
