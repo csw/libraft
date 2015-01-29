@@ -225,6 +225,8 @@ public:
     }
 };
 
+namespace api {
+
 #define api_call(name, argT, hasRet)                                    \
     struct name {                                                       \
         const static CallTag tag = CallTag::name;                       \
@@ -234,12 +236,11 @@ public:
         using allocator_t = private_node_allocator<slot_t, decltype(shm)::segment_manager, 256>; \
         static allocator_t* allocator;                                  \
     };
-
-namespace api {
 #include "raft_api_calls.h"
 #include "raft_fsm_calls.h"
-}
 #undef api_call
+
+}
 
 
 using CallQueue =
