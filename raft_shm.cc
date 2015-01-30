@@ -117,7 +117,7 @@ void Scoreboard::wait_for_raft(pid_t raft_pid)
     }
 }
 
-bool in_shm_bounds(void* ptr)
+bool in_shm_bounds(const void* ptr)
 {
     char* base = (char*) shm.get_address();
     char* cptr = (char*) ptr;
@@ -135,22 +135,22 @@ namespace {
 void run_orphan_gc()
 {
     for (;;) {
-        {
-            std::unique_lock<std::mutex> orphan_lock(orphan_mutex);
-            for (auto slot_i = orphaned_calls.begin();
-                 slot_i != orphaned_calls.end();) {
-                auto& slot = **slot_i;
-                std::unique_lock<decltype(slot.owned)>
-                    slot_lock(slot.owned, std::try_to_lock);
+        std::unique_lock<std::mutex> orphan_lock(orphan_mutex);
+        for (auto slot_i = orphaned_calls.begin();
+             slot_i != orphaned_calls.end();) {
+            auto& slot = **slot_i;
+            std::unique_lock<decltype(slot.owned)>
+                slot_lock(slot.owned, std::try_to_lock);
 
-                if (slot_lock && is_terminal(slot.state)) {
-                    slot.dispose();
-                    slot_i = orphaned_calls.erase(slot_i);
-                } else {
-                    ++slot_i;
-                }
+            if (slot_lock && is_terminal(slot.state)) {
+                slot.dispose();
+                slot_i = orphaned_calls.erase(slot_i);
+            } else {
+                ++slot_i;
             }
         }
+
+        orphan_lock.unlock();
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 }
@@ -295,11 +295,20 @@ pid_t run_raft(const RaftConfig& config)
     }
 }
 
+void orphan_cleanup(const ApplyArgs args)
+{
+    zlog_debug(shm_cat, "Cleaning up orphan Apply args.");
+    const char* raw_buf = (const char*) args.cmd_buf.get();
+    if (in_shm_bounds((void*) raw_buf)) {
+        free_raft_buffer(raw_buf);
+    }
+}
+
 BaseSlot::BaseSlot(CallTag tag_)
     : ret_ready(false),
       tag(tag_),
-      refcount(0),
       state(CallState::Pending),
+      client_state(ClientState::Issued),
       retval(0),
       error(RAFT_SUCCESS),
       timings()
@@ -331,6 +340,8 @@ void BaseSlot::wait()
 {
     std::unique_lock<interprocess_mutex> lock(owned);
     ret_cond.wait(lock, [&] () { return ret_ready; });
+    client_state = ClientState::Observed;
+    timings.record("result received");
 }
 
 namespace {

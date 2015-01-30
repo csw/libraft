@@ -1,9 +1,16 @@
+#include <chrono>
+#include <thread>
+
 #include "gtest/gtest.h"
 
 #include "raft_c_if.h"
+#include "stats.h"
 
 class DummyFSM {
 public:
+    DummyFSM()
+        : delay_us(0)
+    {}
 
     void* apply(uint64_t index, uint64_t term, RaftLogType type,
                 char *cmd, size_t len)
@@ -15,6 +22,9 @@ public:
         (void) len;
 
         ++count;
+
+        std::this_thread::sleep_for(delay_us);
+
         return nullptr;
     }
 
@@ -61,6 +71,7 @@ public:
     }
 
     uint32_t count = 0;
+    std::chrono::microseconds delay_us;
 };
 
 DummyFSM *fsm_instance;
@@ -83,7 +94,9 @@ public:
     RaftFixture()
     {
         fsm_instance = &fsm;
-        raft_init(&fsm_rec, nullptr);
+        raft_default_config(&config);
+        config.single_node = true;
+        raft_init(&fsm_rec, &config);
     }
 
     ~RaftFixture()
@@ -94,9 +107,34 @@ public:
     }
 
     DummyFSM fsm;
+    RaftConfig config;
     RaftFSM fsm_rec = { &FSMApply, &FSMBeginSnapshot, &FSMRestore };
 
 };
 
+void wait_until_leader()
+{
+    while (! raft_is_leader()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+}
+
 TEST_F(RaftFixture, Simple) {
+    wait_until_leader();
+
+    for (int i = 0; i < 5; i++) {
+        char* buf = alloc_raft_buffer(256);
+        raft_future f = raft_apply_async(buf, 256, 0);
+        RaftError err = raft_future_wait(f);
+        ASSERT_EQ(err, RAFT_SUCCESS);
+        free_raft_buffer(buf);
+    }
+    EXPECT_EQ(raft::stats->buffer_alloc, raft::stats->buffer_free);
+}
+
+TEST_F(RaftFixture, NotLeaderYet) {
+    char* buf = alloc_raft_buffer(256);
+    raft_future f = raft_apply_async(buf, 256, 0);
+    RaftError err = raft_future_wait(f);
+    ASSERT_NE(err, RAFT_SUCCESS);
 }

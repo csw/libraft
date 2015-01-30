@@ -61,7 +61,12 @@ enum class CallState {
     Pending, Dispatched, Success, Error
 };
 
+enum class ClientState {
+    Issued, Observed, Abandoned
+};
+
 bool is_terminal(CallState state);
+bool in_shm_bounds(const void* ptr);
 
 template<typename CT> class SlotHandle;
 
@@ -113,6 +118,11 @@ struct NetworkAddr {
 
 struct NoReturn {};
 
+template <typename ArgT>
+void orphan_cleanup(const ArgT arg) { (void) arg; }
+
+void orphan_cleanup(const ApplyArgs args);
+
 class Timings
 {
 public:
@@ -148,19 +158,19 @@ public:
 
     virtual ~BaseSlot() = default;
 
-    interprocess_mutex      owned;
-    bool                    ret_ready;
-    interprocess_condition  ret_cond;
+    interprocess_mutex       owned;
+    bool                     ret_ready;
+    interprocess_condition   ret_cond;
 
-    const CallTag           tag;
-    uint32_t                refcount;
+    const CallTag            tag;
 
     // atomic?
-    CallState               state;
+    CallState                state;
+    std::atomic<ClientState> client_state;
 
-    uint64_t                retval;
-    RaftError               error;
-    Timings                 timings;
+    uint64_t                 retval;
+    RaftError                error;
+    Timings                  timings;
 
     BaseSlot(BaseSlot&) = delete;
     BaseSlot& operator=(BaseSlot&) = delete;
@@ -213,12 +223,18 @@ public:
     
     void dispose()
     {
-        std::unique_lock<interprocess_mutex> lock(owned);
-        if (ret_ready) {
-            lock.unlock();
+        switch (client_state.load(std::memory_order_relaxed)) {
+        case ClientState::Issued:
+            client_state = ClientState::Abandoned;
+            track_orphan(this);
+            break;
+        case ClientState::Observed:
             Call::allocator->deallocate_one(this);
-        } else {
-            assert(false && "not implemented");
+            break;
+        case ClientState::Abandoned:
+            orphan_cleanup(args);
+            Call::allocator->deallocate_one(this);
+            break;
         }
     }
 };
@@ -291,8 +307,6 @@ typename Call::slot_t* send_fsm_request(Args... argv)
     return send_request<Call, Args...>(scoreboard->fsm_queue, argv...);
 }
 
-
-bool in_shm_bounds(void* ptr);
 
 void track_orphan(BaseSlot* slot);
 

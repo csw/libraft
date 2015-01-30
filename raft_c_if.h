@@ -65,6 +65,7 @@ void raft_fsm_take_snapshot(raft_snapshot_req req,
 
 // Top half; client side
 
+void raft_default_config(RaftConfig *cfg);
 RaftError raft_parse_argv(int argc, char *argv[], RaftConfig *cfg);
 pid_t raft_init(RaftFSM *fsm, const RaftConfig *cfg);
 void raft_cleanup();
@@ -104,10 +105,14 @@ raft_future raft_remove_peer(const char *host, uint16_t port);
 RaftError raft_future_wait(raft_future f);
 //int raft_future_wait_for(raft_future f, uint64_t wait_ms);
 RaftError raft_future_get_ptr(raft_future f, void** value_ptr);
+
+/**
+ * Dispose of resources held by a raft_future.
+ */
 void raft_future_dispose(raft_future f);
 
 char* alloc_raft_buffer(size_t len);
-void free_raft_buffer(char* buf);
+void free_raft_buffer(const char* buf);
 
 const char* raft_err_msg(RaftError err);
 

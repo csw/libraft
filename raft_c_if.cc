@@ -58,6 +58,11 @@ const char* raft_err_msg(RaftError err)
     }
 }
 
+void raft_default_config(RaftConfig *cfg)
+{
+    *cfg = raft::default_config();
+}
+
 RaftError raft_parse_argv(int argc, char *argv[], RaftConfig *cfg)
 {
     if (!cfg || !argv)
@@ -169,7 +174,8 @@ RaftError raft_future_get_ptr(raft_future f, void** value_ptr)
 
 void raft_future_dispose(raft_future f)
 {
-    ((BaseSlot*)f)->dispose();
+    auto* slot = ((BaseSlot*)f);
+    slot->dispose();
 }
 
 void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success)
