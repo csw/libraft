@@ -22,9 +22,14 @@ make_dir := $(dir $(makefile_path))
 zlog_dir := zlog/src
 zlog_lib := zlog/src/libzlog.a
 
-.PHONY: all clean run_client
+gtest_dir := ../gtest-1.7.0
+gtest_lib := $(gtest_dir)/make/gtest_main.a
 
-all: libraft.a raft_client $(GO_PROG)
+binaries := raft_client test_suite
+
+.PHONY: all clean test run_client
+
+all: libraft.a $(binaries) $(GO_PROG)
 
 run_client: raft_client $(GO_PROG)
 	./raft_client --single -n 10
@@ -44,8 +49,17 @@ raft_client: raft_client.o raft_shm.o raft_c_if.o $(zlog_lib)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 	dsymutil $@
 
+test.o : CPPFLAGS := $(CPPFLAGS) -I$(gtest_dir)/include
+
+test_suite: test.o libraft.a $(gtest_lib) $(zlog_lib)
+	$(CXX) $(LDFLAGS) -o $@ $^
+
+test: test_suite
+	./test_suite
+
 $(zlog_lib):
 	cd zlog/src && $(MAKE) libzlog.a
 
 clean:
-	-rm -f *.o *.d *.a
+	-rm -rf *.o *.d *.a *.dSYM $(binaries)
+	-go clean -i $(GO_LIB)

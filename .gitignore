@@ -6,3 +6,5 @@
 /perf/
 *.dSYM
 /libraft.org
+/test_suite
+/.DS_Store
