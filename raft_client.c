@@ -1,3 +1,8 @@
+// nanosleep, please
+#define _POSIX_C_SOURCE 199309L
+// snprintf, please
+#define _C99_SOURCE
+
 #include <assert.h>
 #include <ctype.h>
 #include <getopt.h>
@@ -6,6 +11,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "zlog/src/zlog.h"
@@ -20,10 +28,10 @@ static zlog_category_t *cat;
 
 static uint32_t   letter_count = 0;
 
-static unsigned   runs = 20;
-static unsigned   snapshot_period = 0;
-static useconds_t sleep_us = 1000 * 1000;
-static bool       interactive = false;
+static unsigned        runs = 20;
+static unsigned        snapshot_period = 0;
+static struct timespec delay = { 1, 0 }; // 1 second
+static bool            interactive = false;
 
 void  parse_opts(int argc, char *argv[]);
 int   write_snapshot(raft_fsm_snapshot_handle handle, FILE* sink);
@@ -129,7 +137,7 @@ void parse_opts(int argc, char *argv[])
             snapshot_period = strtoul(optarg, NULL, 10);
             break;
         case 'w':
-            sleep_us = strtoul(optarg, NULL, 10);
+            delay.tv_nsec = strtoul(optarg, NULL, 10) * 1000;
             break;
         case 'i':
             interactive = true;
@@ -148,7 +156,7 @@ void run_auto()
         snprintf(buf, BUFSIZE, "Raft command #%d", i);
         send_command(buf);
 
-        usleep(sleep_us);
+        nanosleep(&delay, NULL);
 
         if (snapshot_period && i % snapshot_period == 0) {
             take_snapshot();
