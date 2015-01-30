@@ -158,9 +158,8 @@ RaftError raft_future_wait(raft_future f)
 {
     auto* slot = (BaseSlot*) f;
     slot->wait();
-    slot->timings.record("result received");
     slot->timings.print();
-    return RAFT_SUCCESS;
+    return slot->error;
 }
 
 RaftError raft_future_get_ptr(raft_future f, void** value_ptr)
