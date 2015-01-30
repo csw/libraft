@@ -323,11 +323,12 @@ RaftError parse_argv(int argc, char *argv[], RaftConfig &config);
 /**
  * Set up shared memory and any resident resources.
  *
- * @param name currently ignored...
+ * @param shm_path Path to the shared memory file.
  * @param create whether to create a new shared memory region (for the client) 
  *               or map an existing one (for the Raft side).
+ * @param cfg Raft configuration to be used, or nullptr for the default.
  */
-void shm_init(const char* name, bool create, const RaftConfig* cfg);
+void shm_init(const char* shm_path, bool create, const RaftConfig* cfg);
 
 void shm_cleanup();
 

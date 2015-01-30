@@ -202,9 +202,10 @@ RaftConfig default_config()
     
 
     RaftConfig cfg;
+    strncpy(cfg.shm_path, SHM_PATH, 255);
     cfg.base_dir[0] = '\0';
     cfg.peers[0] = '\0';
-    cfg.listen_port = 0;
+    cfg.listen_port = 9001;
 
     // as dumped from Go
     cfg.HeartbeatTimeout = 1*S;
@@ -222,7 +223,7 @@ RaftConfig default_config()
     return cfg;
 }
 
-void shm_init(const char* name, bool create, const RaftConfig* config)
+void shm_init(const char* path, bool create, const RaftConfig* config)
 {
     init_stats();
     if (zlog_init("zlog.conf")) {
@@ -237,8 +238,8 @@ void shm_init(const char* name, bool create, const RaftConfig* config)
         // client side
         assert(config);
         struct stat shm_stat;
-        if (stat(SHM_PATH, &shm_stat) == 0) {
-            if (unlink(SHM_PATH) == -1) {
+        if (stat(path, &shm_stat) == 0) {
+            if (unlink(path) == -1) {
                 perror("Failed to remove old shared memory file");
                 exit(1);
             }
@@ -247,21 +248,22 @@ void shm_init(const char* name, bool create, const RaftConfig* config)
             exit(1);
         }
         shm = managed_mapped_file(boost::interprocess::create_only, 
-                                  SHM_PATH, SHM_SIZE);
+                                  path, SHM_SIZE);
         scoreboard = shm.construct<Scoreboard>(unique_instance)();
         RaftConfig* shared_config = shm.construct<RaftConfig>(unique_instance)();
         *shared_config = *config;
+        strncpy(shared_config->shm_path, path, 255);
         init_client_allocators();
         zlog_debug(shm_cat, "Initialized shared memory and scoreboard.");
     } else {
         // Raft side
         assert(!config);
         shm = managed_mapped_file(boost::interprocess::open_only,
-                                  SHM_PATH);
+                                  path);
         zlog_debug(shm_cat, "Opened shared memory.");
         // unlink the file after we've mapped it, nobody else will need it
         // XXX: add option to leave it for debugging?
-        if (unlink(SHM_PATH) == -1) {
+        if (unlink(path) == -1) {
             perror("Failed to unlink shared memory file");
             exit(1);
         }
@@ -375,31 +377,11 @@ std::vector<const char*> build_raft_argv(const RaftConfig& cfg)
     std::vector<const char*> args;
     args.push_back("raft_if");
 
-    if (*cfg.base_dir) {
-        args.push_back("-dir");
-        args.push_back(cfg.base_dir);
-    }
-    if (cfg.listen_port) {
-        args.push_back("-port");
-        auto s = new std::string(std::to_string(cfg.listen_port));
-        args.push_back(s->c_str());
-    }
-    if (cfg.EnableSingleNode) {
-        args.push_back("-single");
-    }
-    if (*cfg.peers) {
-        args.push_back("-peers");
-        args.push_back(cfg.peers);
-    }
+    args.push_back("-shm");
+    args.push_back(cfg.shm_path);
+
     args.push_back(nullptr);
 
-    /*
-    fprintf(stderr, "Raft argv: ");
-    for (const char* arg : args) {
-        fprintf(stderr, "%s ", arg);
-    }
-    fprintf(stderr, "\n");
-    */
     return args;
 }
 

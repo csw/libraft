@@ -26,25 +26,6 @@
 extern "C" {
 #endif
 
-typedef struct {
-    char     base_dir[256];
-    uint16_t listen_port;
-    char     peers[256];
-
-    uint64_t HeartbeatTimeout;
-    uint64_t ElectionTimeout;
-    uint64_t CommitTimeout;
-    uint32_t MaxAppendEntries;
-    bool     ShutdownOnRemove;
-    bool     DisableBootstrapAfterElect;
-    uint64_t TrailingLogs;
-    uint64_t SnapshotInterval;
-    uint64_t SnapshotThreshold;
-    bool     EnableSingleNode;
-    uint64_t LeaderLeaseTimeout;
-    char     LogOutput[256];
-} RaftConfig;
-
 // Bottom half; FSM side
 
 typedef void* raft_future;
