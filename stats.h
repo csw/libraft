@@ -26,6 +26,9 @@ public:
 
     Counter buffer_alloc;
     Counter buffer_free;
+
+    Counter call_alloc;
+    Counter call_free;
 };
 
 extern std::unique_ptr<Stats> stats;

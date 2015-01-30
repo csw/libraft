@@ -24,6 +24,7 @@
 #include "queue.h"
 #include "raft_defs.h"
 #include "raft_c_if.h"
+#include "stats.h"
 
 namespace raft {
 
@@ -230,10 +231,12 @@ public:
             break;
         case ClientState::Observed:
             Call::allocator->deallocate_one(this);
+            stats->call_free.inc();
             break;
         case ClientState::Abandoned:
             orphan_cleanup(args);
             Call::allocator->deallocate_one(this);
+            stats->call_free.inc();
             break;
         }
     }
@@ -286,6 +289,7 @@ template <typename Call, typename... Args>
 typename Call::slot_t* send_request(CallQueue& queue, Args... argv)
 {
     auto start_t = Timings::clock::now();
+    stats->call_alloc.inc();
     auto slot_ptr = Call::allocator->allocate_one();
     auto* slot = new(&*slot_ptr) typename Call::slot_t (argv...);
     auto built_t = Timings::clock::now();

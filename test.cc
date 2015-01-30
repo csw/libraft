@@ -128,8 +128,10 @@ TEST_F(RaftFixture, Simple) {
         RaftError err = raft_future_wait(f);
         ASSERT_EQ(err, RAFT_SUCCESS);
         free_raft_buffer(buf);
+        raft_future_dispose(f);
     }
     EXPECT_EQ(raft::stats->buffer_alloc, raft::stats->buffer_free);
+    EXPECT_EQ(raft::stats->call_alloc, raft::stats->call_free);
 }
 
 TEST_F(RaftFixture, NotLeaderYet) {
