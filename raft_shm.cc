@@ -177,7 +177,7 @@ RaftError parse_argv(int argc, char *argv[], RaftConfig &cfg)
             cfg.listen_port = atoi(optarg);
             break;
         case 's': // single-node
-            cfg.single_node = true;
+            cfg.EnableSingleNode = true;
             break;
         case 'P': // peers
             strncpy(cfg.peers, optarg, 255);
@@ -195,15 +195,34 @@ RaftError parse_argv(int argc, char *argv[], RaftConfig &cfg)
 
 RaftConfig default_config()
 {
+    const static uint64_t US = 1000; // ns
+    const static uint64_t MS = 1000 * US;
+    const static uint64_t S  = 1000 * MS;
+    const static uint64_t M  = 60 * S;
+    
+
     RaftConfig cfg;
     cfg.base_dir[0] = '\0';
     cfg.peers[0] = '\0';
     cfg.listen_port = 0;
-    cfg.single_node = false;
+
+    // as dumped from Go
+    cfg.HeartbeatTimeout = 1*S;
+    cfg.ElectionTimeout = 1*S;
+    cfg.CommitTimeout = 50*MS;
+    cfg.MaxAppendEntries = 64;
+    cfg.ShutdownOnRemove = true;
+    cfg.DisableBootstrapAfterElect = true;
+    cfg.TrailingLogs = 10240;
+    cfg.SnapshotInterval = 2*M;
+    cfg.SnapshotThreshold = 8192;
+    cfg.EnableSingleNode = false;
+    cfg.LeaderLeaseTimeout = 500*MS;
+
     return cfg;
 }
 
-void shm_init(const char* name, bool create)
+void shm_init(const char* name, bool create, const RaftConfig* config)
 {
     init_stats();
     if (zlog_init("zlog.conf")) {
@@ -216,6 +235,7 @@ void shm_init(const char* name, bool create)
     // register on-exit callback to call remove()?
     if (create) {
         // client side
+        assert(config);
         struct stat shm_stat;
         if (stat(SHM_PATH, &shm_stat) == 0) {
             if (unlink(SHM_PATH) == -1) {
@@ -229,10 +249,13 @@ void shm_init(const char* name, bool create)
         shm = managed_mapped_file(boost::interprocess::create_only, 
                                   SHM_PATH, SHM_SIZE);
         scoreboard = shm.construct<Scoreboard>(unique_instance)();
+        RaftConfig* shared_config = shm.construct<RaftConfig>(unique_instance)();
+        *shared_config = *config;
         init_client_allocators();
         zlog_debug(shm_cat, "Initialized shared memory and scoreboard.");
     } else {
         // Raft side
+        assert(!config);
         shm = managed_mapped_file(boost::interprocess::open_only,
                                   SHM_PATH);
         zlog_debug(shm_cat, "Opened shared memory.");
@@ -268,7 +291,7 @@ void shm_cleanup()
     shm = decltype(shm)();
 }
 
-pid_t run_raft(const RaftConfig& config)
+pid_t run_raft()
 {
     pid_t kidpid = fork();
     if (kidpid == -1) {
@@ -286,7 +309,8 @@ pid_t run_raft(const RaftConfig& config)
         return kidpid;
     } else {
         // child
-        auto argv = build_raft_argv(config);
+        auto config = shm.find<RaftConfig>(unique_instance).first;
+        auto argv = build_raft_argv(*config);
         int rc = execvp("raft_if", (char * const *)argv.data());
         if (rc) {
             perror("Exec failed");
@@ -360,7 +384,7 @@ std::vector<const char*> build_raft_argv(const RaftConfig& cfg)
         auto s = new std::string(std::to_string(cfg.listen_port));
         args.push_back(s->c_str());
     }
-    if (cfg.single_node) {
+    if (cfg.EnableSingleNode) {
         args.push_back("-single");
     }
     if (*cfg.peers) {

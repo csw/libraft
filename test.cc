@@ -95,7 +95,7 @@ public:
     {
         fsm_instance = &fsm;
         raft_default_config(&config);
-        config.single_node = true;
+        config.EnableSingleNode = true;
         raft_init(&fsm_rec, &config);
     }
 

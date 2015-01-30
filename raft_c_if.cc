@@ -79,10 +79,10 @@ pid_t raft_init(RaftFSM *fsm_, const RaftConfig *config_arg)
     } else {
         config = raft::default_config();
     }
-    raft::shm_init("raft", true);
+    raft::shm_init("raft", true, &config);
 
     fsm = fsm_;
-    raft::run_raft(config);
+    raft::run_raft();
     zlog_info(shm_cat, "Started Raft process: pid %d.", raft_pid);
     start_fsm_worker(fsm);
     raft::scoreboard->wait_for_raft(raft_pid);

@@ -327,7 +327,7 @@ RaftError parse_argv(int argc, char *argv[], RaftConfig &config);
  * @param create whether to create a new shared memory region (for the client) 
  *               or map an existing one (for the Raft side).
  */
-void shm_init(const char* name, bool create);
+void shm_init(const char* name, bool create, const RaftConfig* cfg);
 
 void shm_cleanup();
 
@@ -336,7 +336,7 @@ void shm_cleanup();
  *
  * To be called from the client after shm_init().
  */
-pid_t run_raft(const RaftConfig& config);
+pid_t run_raft();
 
 }
 
