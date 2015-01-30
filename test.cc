@@ -140,3 +140,23 @@ TEST_F(RaftFixture, NotLeaderYet) {
     RaftError err = raft_future_wait(f);
     ASSERT_NE(err, RAFT_SUCCESS);
 }
+
+TEST_F(RaftFixture, OrphanCleanup) {
+    wait_until_leader();
+    fsm.delay_us = std::chrono::milliseconds(50);
+
+    const int passes = 20;
+    for (int i = 0; i < passes; i++) {
+        char* buf = alloc_raft_buffer(256);
+        raft_future f = raft_apply_async(buf, 256, 0);
+        raft_future_dispose(f);
+    }
+    
+    EXPECT_NE(raft::stats->buffer_alloc, raft::stats->buffer_free);
+    EXPECT_NE(raft::stats->call_alloc, raft::stats->call_free);
+    
+    std::this_thread::sleep_for((passes+20)*fsm.delay_us);
+
+    EXPECT_EQ(raft::stats->buffer_alloc, raft::stats->buffer_free);
+    EXPECT_EQ(raft::stats->call_alloc, raft::stats->call_free);
+}
