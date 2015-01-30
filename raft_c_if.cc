@@ -10,6 +10,7 @@
 
 #include "raft_c_if.h"
 #include "raft_shm.h"
+#include "stats.h"
 
 using boost::interprocess::anonymous_instance;
 using boost::interprocess::interprocess_mutex;
@@ -340,12 +341,14 @@ void run_snapshot_job(const SnapshotJob& job)
 
 char* alloc_raft_buffer(size_t len)
 {
+    stats->buffer_alloc.inc();
     return (char*) shm.allocate(len);
 }
 
-void free_raft_buffer(char* buf)
+void free_raft_buffer(const char* buf)
 {
-    raft::shm.deallocate(buf);
+    stats->buffer_free.inc();
+    raft::shm.deallocate((void*) buf);
 }
 
 void init_err_msgs()

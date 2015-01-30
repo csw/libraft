@@ -8,6 +8,7 @@
 #include <string>
 
 #include "raft_shm.h"
+#include "stats.h"
 
 namespace raft {
 
@@ -204,6 +205,7 @@ RaftConfig default_config()
 
 void shm_init(const char* name, bool create)
 {
+    init_stats();
     if (zlog_init("zlog.conf")) {
         fprintf(stderr, "zlog init failed\n");
     }

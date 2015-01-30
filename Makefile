@@ -43,11 +43,10 @@ $(GO_PROG): $(GO_DIR)/raft_if.go $(GO_DIR)/raft_go_if.h $(GO_DIR)/raft_go_if.cc 
 
 -include $(patsubst %.cc,%.d,*.cc)
 
-libraft.a: libraft.a(raft_shm.o) libraft.a(raft_c_if.o)
+libraft.a: libraft.a(raft_shm.o) libraft.a(raft_c_if.o) libraft.a(stats.o)
 
-raft_client: raft_client.o raft_shm.o raft_c_if.o $(zlog_lib)
+raft_client: raft_client.o libraft.a $(zlog_lib)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
-	dsymutil $@
 
 test.o : CPPFLAGS := $(CPPFLAGS) -I$(gtest_dir)/include
 
