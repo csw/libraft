@@ -157,7 +157,43 @@ TEST_F(RaftFixture, NotLeaderYet) {
     char* buf = alloc_raft_buffer(256);
     raft_future f = raft_apply_async(buf, 256, 0);
     RaftError err = raft_future_wait(f);
-    ASSERT_NE(err, RAFT_SUCCESS);
+    ASSERT_NE(RAFT_SUCCESS, err);
+}
+
+TEST_F(RaftFixture, AddRemovePeer) {
+    const char localhost[] = "localhost";
+    const char bogus[] = "snuffleupagus.example.com";
+    raft_future f;
+    RaftError err;
+
+    wait_until_leader();
+
+    f = raft_add_peer(bogus, 21064);
+    err = raft_future_wait(f);
+    EXPECT_EQ(RAFT_E_RESOLVE, err);
+    raft_future_dispose(f);
+
+    f = raft_remove_peer(bogus, 21064);
+    err = raft_future_wait(f);
+    EXPECT_EQ(RAFT_E_RESOLVE, err);
+    raft_future_dispose(f);
+
+    f = raft_remove_peer(localhost, 21064);
+    err = raft_future_wait(f);
+    ASSERT_EQ(RAFT_E_UNKNOWN_PEER, err);
+    raft_future_dispose(f);
+
+    f = raft_add_peer(localhost, 9001);
+    err = raft_future_wait(f);
+    ASSERT_EQ(RAFT_E_KNOWN_PEER, err);
+    raft_future_dispose(f);
+
+    f = raft_add_peer(localhost, 21064);
+    err = raft_future_wait(f);
+    // this is a bit problematic
+    // we lose quorum if we successfully add a peer...
+    ASSERT_EQ(RAFT_E_LEADERSHIP_LOST, err);
+    raft_future_dispose(f);
 }
 
 TEST_F(RaftFixture, OrphanCleanup) {
@@ -179,4 +215,3 @@ TEST_F(RaftFixture, OrphanCleanup) {
     EXPECT_EQ(raft::stats->buffer_alloc, raft::stats->buffer_free);
     EXPECT_EQ(raft::stats->call_alloc, raft::stats->call_free);
 }
-
