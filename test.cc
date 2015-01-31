@@ -1,12 +1,26 @@
 #include <chrono>
 #include <thread>
+#include <memory>
 
 #include "gtest/gtest.h"
 
 #include "raft_c_if.h"
 #include "stats.h"
 
-class DummyFSM {
+class FSM {
+public:
+    virtual ~FSM() = default;
+
+    virtual void* apply(uint64_t index, uint64_t term, RaftLogType type,
+                        char *cmd, size_t len) = 0;
+    virtual void begin_snapshot(const char *path, raft_snapshot_req s) = 0;
+    virtual int restore(const char *path) = 0;
+    virtual int write_snapshot(raft_fsm_snapshot_handle handle, FILE* sink) = 0;
+};
+
+static int FSMWriteSnapshot(raft_fsm_snapshot_handle handle, FILE* sink);
+
+class DummyFSM : public FSM {
 public:
     DummyFSM()
         : delay_us(0)
@@ -33,7 +47,7 @@ public:
         (void) path;
         raft_fsm_take_snapshot(s,
                                (raft_fsm_snapshot_handle) new uint32_t(count),
-                               &write_snapshot);
+                               &FSMWriteSnapshot);
     }
 
     int restore(const char *path)
@@ -58,7 +72,7 @@ public:
         }
     }
 
-    static int write_snapshot(raft_fsm_snapshot_handle handle, FILE* sink)
+    int write_snapshot(raft_fsm_snapshot_handle handle, FILE* sink)
     {
         auto state = std::unique_ptr<uint32_t>((uint32_t*) handle);
         int chars = fprintf(sink, "%u\n", *state);
@@ -74,7 +88,8 @@ public:
     std::chrono::microseconds delay_us;
 };
 
-DummyFSM *fsm_instance;
+FSM* fsm_instance;
+
 static void* FSMApply(uint64_t index, uint64_t term, RaftLogType type,
                       char *cmd, size_t len)
 {
@@ -87,6 +102,10 @@ static void FSMBeginSnapshot(const char *path, raft_snapshot_req s)
 static int FSMRestore(const char *path)
 {
     return fsm_instance->restore(path);
+}
+static int FSMWriteSnapshot(raft_fsm_snapshot_handle handle, FILE* sink)
+{
+    return fsm_instance->write_snapshot(handle, sink);
 }
 
 class RaftFixture : public ::testing::Test {
@@ -160,3 +179,4 @@ TEST_F(RaftFixture, OrphanCleanup) {
     EXPECT_EQ(raft::stats->buffer_alloc, raft::stats->buffer_free);
     EXPECT_EQ(raft::stats->call_alloc, raft::stats->call_free);
 }
+

@@ -57,7 +57,7 @@ fsm_result_t update_count(const char *buf, size_t len)
 
     uint32_t *result = malloc(sizeof(uint32_t)); // yeah, yeah, it's 4
     assert(result);
-    zlog_debug(cat, "Allocated result object @ %p\n", result);
+    zlog_debug(cat, "Allocated result object @ %p\n", (void*)result);
     *result = letter_count;
     return result;
 }

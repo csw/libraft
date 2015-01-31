@@ -2,13 +2,15 @@
 #ifndef QUEUE_H
 #define QUEUE_H
 
+#include <condition_variable>
 #include <cstdint>
-#include <thread>
+#include <mutex>
 
 namespace queue {
 
 template <typename T, uint32_t Capacity,
-          typename Mutex=std::mutex, typename CV=std::condition_variable>
+          typename Mutex=std::mutex,
+          typename CV=std::condition_variable>
 class ArrayBlockingQueue
 {
 public:

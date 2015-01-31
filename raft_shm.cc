@@ -1,3 +1,4 @@
+#include <cinttypes>
 #include <cstdio>
 #include <getopt.h>
 #include <unistd.h>
@@ -72,6 +73,8 @@ bool is_terminal(CallState state)
     case CallState::Success:
     case CallState::Error:
         return true;
+    default: // make poor old gcc happy
+        assert(false && "unexpected call state!");
     }
 }
 
@@ -480,9 +483,9 @@ void Timings::print()
     time_point start = entries[0].ts;
     time_point prev  = entries[0].ts;
     for (uint32_t i = 1; i < n_entries; ++i) {
-        auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(entries[i].ts - start).count();
-        auto delta_us = std::chrono::duration_cast<std::chrono::microseconds>(entries[i].ts - prev).count();
-        fprintf(stderr, "%-20s @ %7lld us, delta %7lld us.\n",
+        int64_t elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(entries[i].ts - start).count();
+        int64_t delta_us = std::chrono::duration_cast<std::chrono::microseconds>(entries[i].ts - prev).count();
+        fprintf(stderr, "%-20s @ %7" PRId64 " us, delta %7" PRId64 " us.\n",
                 entries[i].tag, elapsed_us, delta_us);
         prev = entries[i].ts;
     }

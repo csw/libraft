@@ -2,14 +2,25 @@ makefile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
 make_dir := $(dir $(makefile_path))
 
 uname := $(shell uname -s)
-clang_pp := $(shell which clang++)
 
-ifdef clang_pp
-    CC  = clang
-    CXX = clang++
-    export CC
-    export CXX
+ifeq ($(uname),Linux)
+    LIBS += -pthread
+else ifeq ($(uname),Darwin)
+    ifeq ($(CXX),c++)
+        CXX := clang++
+    endif
 endif
+
+ifeq ($(CXX),clang++)
+    CC           = clang
+    CXXFLAGS    += -stdlib=libc++
+    CGO_LDFLAGS += -lc++
+else ifeq ($(CXX),g++)
+    LIBS        += -lstdc++
+endif
+
+export CC
+export CXX
 
 GOPATH  = $(HOME)/go
 GO_LIB  = github.com/csw/raft_if
@@ -23,17 +34,13 @@ export GOPATH PATH
 
 CPPFLAGS += -isystem $(make_dir)/deps
 
-CXXFLAGS += -std=c++11 -stdlib=libc++
-CXXFLAGS += -Wall -Werror -pedantic
+CXXFLAGS += -std=c++11
+CXXFLAGS += -Wall -Werror #-pedantic
 CXXFLAGS += -Wno-variadic-macros -Wno-gnu-zero-variadic-macro-arguments
 CXXFLAGS += -g -MMD
 
 CFLAGS += -Wall -Werror -pedantic -std=c99
 CFLAGS += -g -MMD
-
-ifeq ($(uname),Linux)
-    LIBS += -pthread -lstdc++
-endif
 
 zlog_dir := zlog/src
 zlog_lib := zlog/src/libzlog.a
@@ -50,11 +57,8 @@ all: libraft.a $(binaries) $(GO_PROG)
 run_client: raft_client $(GO_PROG)
 	./raft_client --single -n 10
 
-CGO_CPPFLAGS  = -I$(make_dir)
-CGO_CPPFLAGS += -isystem $(make_dir)/deps
-CGO_LDFLAGS   = -L$(make_dir) -lraft
-# a Clang-ism, revisit for gcc
-CGO_LDFLAGS  += -lc++
+CGO_CPPFLAGS  = -I$(make_dir) $(CPPFLAGS)
+CGO_LDFLAGS  += -L$(make_dir) -lraft
 CGO_LDFLAGS  += $(make_dir)/$(zlog_dir)/libzlog.a $(LIBS)
 
 $(GO_PROG): $(GO_DIR)/raft_if.go $(GO_DIR)/raft_go_if.h \
@@ -84,14 +88,14 @@ test.o : CPPFLAGS := $(CPPFLAGS) -I$(gtest_dir)/include
 test_suite: test.o libraft.a $(gtest_lib) $(zlog_lib)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-test: test_suite
+test: test_suite $(GO_PROG)
 	./test_suite
 
 $(zlog_lib):
 	cd zlog/src && $(MAKE) libzlog.a
 
 $(gtest_lib):
-	cd $(gtest_dir)/make && $(MAKE) "CXXFLAGS=$(CXXFLAGS)"
+	cd $(gtest_dir)/make && $(MAKE) "CXXFLAGS=$(CXXFLAGS)" gtest_main.a
 
 clean:
 	-rm -rf *.o *.d *.a *.dSYM $(binaries)
