@@ -10,6 +10,7 @@ extern "C" {
 
 typedef struct {
     char     shm_path[256];
+    uint64_t shm_size;
     char     base_dir[256];
     uint16_t listen_port;
     char     peers[256];
@@ -26,6 +27,8 @@ typedef struct {
     bool     EnableSingleNode;
     uint64_t LeaderLeaseTimeout;
     char     LogOutput[256];
+
+    uint32_t RetainSnapshots;
 } RaftConfig;
 
 typedef enum raft_log_type {

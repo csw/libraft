@@ -31,6 +31,8 @@ namespace api {
 namespace {
 
 const struct option LONG_OPTS[] = {
+    { "shm-path", required_argument, NULL, 'm' },
+    { "shm-size", required_argument, NULL, 'M' },
     { "dir",      required_argument, NULL, 'd' },
     { "p",        required_argument, NULL, 'p' },
     { "port",     required_argument, NULL, 'p' },
@@ -45,6 +47,7 @@ std::list<BaseSlot*> orphaned_calls;
 std::thread raft_watcher;
 std::thread orphan_gc_thread;
 
+uint64_t parse_size(const char *spec);
 std::vector<const char*> build_raft_argv(const RaftConfig& cfg);
 void watch_raft_proc(pid_t raft_pid);
 void run_orphan_gc();
@@ -158,6 +161,35 @@ void run_orphan_gc()
     }
 }
 
+uint64_t parse_size(const char *spec)
+{
+    char *endp = nullptr;
+    uint64_t coeff = strtoul(spec, &endp, 10);
+    uint64_t val;
+    assert(endp);
+    switch (*endp) {
+    case '\0':
+        val = coeff;
+        break;
+    case 'k':
+    case 'K':
+        val = coeff * 1024;
+        break;
+    case 'm':
+    case 'M':
+        val = coeff * 1024 * 1024;
+        break;
+    case 'g':
+    case 'G':
+        val = coeff * 1024 * 1024 * 1024;
+        break;
+    default:
+        zlog_error(shm_cat, "Unhandled trailing character %c in size", *endp);
+        val = coeff;
+    }
+    return val;
+}
+
 }
 
 RaftError parse_argv(int argc, char *argv[], RaftConfig &cfg)
@@ -173,6 +205,12 @@ RaftError parse_argv(int argc, char *argv[], RaftConfig &cfg)
         if (c == -1)
             break;
         switch (c) {
+        case 'm':
+            strncpy(cfg.shm_path, optarg, 255);
+            break;
+        case 'M':
+            cfg.shm_size = parse_size(optarg);
+            break;
         case 'd': // Raft dir
             strncpy(cfg.base_dir, optarg, 255);
             break;
@@ -206,6 +244,7 @@ RaftConfig default_config()
 
     RaftConfig cfg;
     strncpy(cfg.shm_path, SHM_PATH, 255);
+    cfg.shm_size = SHM_SIZE;
     cfg.base_dir[0] = '\0';
     cfg.peers[0] = '\0';
     cfg.listen_port = 9001;
@@ -222,6 +261,8 @@ RaftConfig default_config()
     cfg.SnapshotThreshold = 8192;
     cfg.EnableSingleNode = false;
     cfg.LeaderLeaseTimeout = 500*MS;
+
+    cfg.RetainSnapshots = 8;
 
     return cfg;
 }
@@ -251,7 +292,9 @@ void shm_init(const char* path, bool create, const RaftConfig* config)
             exit(1);
         }
         shm = managed_mapped_file(boost::interprocess::create_only, 
-                                  path, SHM_SIZE);
+                                  path, config->shm_size);
+        zlog_debug(shm_cat, "Mapped shared memory file %s, %llu MB.",
+                   path, config->shm_size / 1048576);
         scoreboard = shm.construct<Scoreboard>(unique_instance)();
         RaftConfig* shared_config = shm.construct<RaftConfig>(unique_instance)();
         *shared_config = *config;
@@ -263,7 +306,7 @@ void shm_init(const char* path, bool create, const RaftConfig* config)
         assert(!config);
         shm = managed_mapped_file(boost::interprocess::open_only,
                                   path);
-        zlog_debug(shm_cat, "Opened shared memory.");
+        zlog_debug(shm_cat, "Opened shared memory file %s.", path);
         // unlink the file after we've mapped it, nobody else will need it
         // XXX: add option to leave it for debugging?
         if (unlink(path) == -1) {
@@ -380,7 +423,7 @@ std::vector<const char*> build_raft_argv(const RaftConfig& cfg)
     std::vector<const char*> args;
     args.push_back("raft_if");
 
-    args.push_back("-shm");
+    args.push_back("--shm-path");
     args.push_back(cfg.shm_path);
 
     args.push_back(nullptr);
