@@ -160,7 +160,6 @@ public:
     virtual ~BaseSlot() = default;
 
     interprocess_mutex       owned;
-    bool                     ret_ready;
     interprocess_condition   ret_cond;
 
     const CallTag            tag;
@@ -286,12 +285,18 @@ public:
 };
 
 template <typename Call, typename... Args>
+typename Call::slot_t* alloc_request_(Args... argv)
+{
+    stats->call_alloc.inc();
+    auto slot_ptr = Call::allocator->allocate_one();
+    return new(&*slot_ptr) typename Call::slot_t (argv...);
+}
+
+template <typename Call, typename... Args>
 typename Call::slot_t* send_request(CallQueue& queue, Args... argv)
 {
     auto start_t = Timings::clock::now();
-    stats->call_alloc.inc();
-    auto slot_ptr = Call::allocator->allocate_one();
-    auto* slot = new(&*slot_ptr) typename Call::slot_t (argv...);
+    auto* slot = alloc_request_<Call>(argv...);
     auto built_t = Timings::clock::now();
     slot->timings = Timings(start_t);
     slot->timings.record("constructed", built_t);
@@ -311,6 +316,15 @@ typename Call::slot_t* send_fsm_request(Args... argv)
     return send_request<Call, Args...>(scoreboard->fsm_queue, argv...);
 }
 
+template <typename Call, typename... Args>
+typename Call::slot_t* make_error_request(RaftError err, Args... argv)
+{
+    assert(err != RAFT_SUCCESS);
+    auto* slot = alloc_request_<Call>(argv...);
+    slot->error = err;
+    slot->state = CallState::Error;
+    return slot;
+}
 
 void track_orphan(BaseSlot* slot);
 

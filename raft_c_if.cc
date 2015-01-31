@@ -116,16 +116,32 @@ bool raft_is_leader()
 
 raft_future raft_apply_async(char* cmd, size_t cmd_len, uint64_t timeout_ns)
 {
-    return (raft_future)
-        send_api_request<api::Apply>(cmd, cmd_len, timeout_ns);
+    if (cmd && in_shm_bounds((void*) cmd)
+        && in_shm_bounds((void*) (cmd+cmd_len))) {
+        return (raft_future)
+            send_api_request<api::Apply>(cmd, cmd_len, timeout_ns);
+    } else {
+        return make_error_request<api::Apply>(RAFT_E_INVALID_ADDRESS,
+                                              cmd, cmd_len, timeout_ns);
+    }
 }
 
 RaftError raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns, void **res)
 {
+    /*
+    if (cmd == nullptr || res == nullptr) {
+        return RAFT_E_INVALID_ADDRESS;
+    } else if (! (in_shm_bounds((void*) cmd)
+                  && in_shm_bounds((void*) (cmd+cmd_len)))) {
+        return RAFT_E_INVALID_ADDRESS;
+    }
+    */
     raft_future f = raft_apply_async(cmd, cmd_len, timeout_ns);
     raft_future_wait(f);
     zlog_debug(msg_cat, "Result of call %p is ready.", f);
-    return raft_future_get_ptr(f, res);
+    RaftError err = raft_future_get_ptr(f, res);
+    raft_future_dispose(f);
+    return err;
 }
 
 raft_future raft_barrier(uint64_t timeout_ns)

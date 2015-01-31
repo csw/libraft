@@ -377,8 +377,7 @@ void orphan_cleanup(const ApplyArgs args)
 }
 
 BaseSlot::BaseSlot(CallTag tag_)
-    : ret_ready(false),
-      tag(tag_),
+    : tag(tag_),
       state(CallState::Pending),
       client_state(ClientState::Issued),
       retval(0),
@@ -394,9 +393,8 @@ BaseSlot::call_rec BaseSlot::rec()
 void BaseSlot::reply(RaftError err)
 {
     error = err;
+    assert(! is_terminal(state));
     state = (err == RAFT_SUCCESS) ? CallState::Success : CallState::Error;
-    assert(! ret_ready);
-    ret_ready = true;
     ret_cond.notify_one();
     timings.record("reply sent");
 }
@@ -411,7 +409,7 @@ void BaseSlot::reply(uint64_t retval_)
 void BaseSlot::wait()
 {
     std::unique_lock<interprocess_mutex> lock(owned);
-    ret_cond.wait(lock, [&] () { return ret_ready; });
+    ret_cond.wait(lock, [&] () { return is_terminal(state); });
     client_state = ClientState::Observed;
     timings.record("result received");
 }

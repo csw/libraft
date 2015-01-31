@@ -153,6 +153,44 @@ TEST_F(RaftFixture, Simple) {
     EXPECT_EQ(raft::stats->call_alloc, raft::stats->call_free);
 }
 
+TEST_F(RaftFixture, BadApply) {
+    wait_until_leader();
+
+    raft_future f;
+    RaftError err;
+    char* buf = alloc_raft_buffer(256);
+    char* badbuf = new char[256];
+    void* result = nullptr;
+    ASSERT_NE(nullptr, badbuf);
+    strncpy(buf,    "hello", 255);
+    strncpy(badbuf, "hello", 255);
+
+    f = raft_apply_async(badbuf, 256, 0);
+    EXPECT_EQ(RAFT_E_INVALID_ADDRESS, raft_future_wait(f));
+    raft_future_dispose(f);
+
+    f = raft_apply_async(nullptr, 256, 0);
+    EXPECT_EQ(RAFT_E_INVALID_ADDRESS, raft_future_wait(f));
+    raft_future_dispose(f);
+
+    err = raft_apply(badbuf, 256, 0, &result);
+    EXPECT_EQ(RAFT_E_INVALID_ADDRESS, err);
+    EXPECT_EQ(nullptr, result);
+
+    err = raft_apply(nullptr, 256, 0, &result);
+    EXPECT_EQ(RAFT_E_INVALID_ADDRESS, err);
+    EXPECT_EQ(nullptr, result);
+
+    err = raft_apply(buf, 256, 0, nullptr);
+    EXPECT_EQ(RAFT_E_INVALID_ADDRESS, err);
+
+    free_raft_buffer(buf);
+    delete[] badbuf;
+
+    EXPECT_EQ(raft::stats->buffer_alloc, raft::stats->buffer_free);
+    EXPECT_EQ(raft::stats->call_alloc, raft::stats->call_free);
+}
+
 TEST_F(RaftFixture, NotLeaderYet) {
     char* buf = alloc_raft_buffer(256);
     raft_future f = raft_apply_async(buf, 256, 0);
