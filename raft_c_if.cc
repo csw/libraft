@@ -10,6 +10,7 @@
 
 #include "raft_c_if.h"
 #include "raft_shm.h"
+#include "locks.h"
 #include "stats.h"
 
 using boost::interprocess::anonymous_instance;
@@ -225,6 +226,7 @@ void run_fsm_worker(RaftFSM* fsm)
         CallTag tag = rec.first;
         BaseSlot::pointer slot = rec.second;
         raft::mutex_lock l(slot->owned);
+        pthread_cleanup_push(locks::unlocker_checked<decltype(l)>, &l);
         slot->timings.record("FSM call received");
         zlog_debug(msg_cat, "FSM call received, tag %d, call %p.",
                    tag, rec.second.get());
@@ -246,6 +248,7 @@ void run_fsm_worker(RaftFSM* fsm)
             zlog_fatal(msg_cat, "Unhandled call type: %d", tag);
             abort();
         }
+        pthread_cleanup_pop(0);
     }
 }
 
@@ -325,12 +328,14 @@ void run_snapshot_worker()
 {
     for (;;) {
         std::unique_lock<decltype(snapshot_mutex)> lock(snapshot_mutex);
+        pthread_cleanup_push(locks::unlocker_checked<decltype(lock)>, &lock);
         while (snapshot_jobs.empty())
             snapshot_available.wait(lock);
         const SnapshotJob job = snapshot_jobs.front();
         snapshot_jobs.pop_front();
         lock.unlock();
         run_snapshot_job(job);
+        pthread_cleanup_pop(0);
     }
 }
 

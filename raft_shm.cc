@@ -142,6 +142,7 @@ void run_orphan_gc()
 {
     for (;;) {
         std::unique_lock<std::mutex> orphan_lock(orphan_mutex);
+        pthread_cleanup_push(locks::unlocker<decltype(orphan_lock)>, &orphan_lock);
         for (auto slot_i = orphaned_calls.begin();
              slot_i != orphaned_calls.end();) {
             auto& slot = **slot_i;
@@ -158,6 +159,7 @@ void run_orphan_gc()
 
         orphan_lock.unlock();
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        pthread_cleanup_pop(0);
     }
 }
 

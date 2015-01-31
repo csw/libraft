@@ -1,10 +1,17 @@
+#include <cassert>
 #include <chrono>
-#include <thread>
 #include <memory>
+#include <mutex>
+#include <pthread.h>
+#include <stdlib.h>
+#include <string>
+#include <thread>
+#include <unistd.h>
 
 #include "gtest/gtest.h"
 
 #include "raft_c_if.h"
+#include "locks.h"
 #include "stats.h"
 
 class FSM {
@@ -252,4 +259,26 @@ TEST_F(RaftFixture, OrphanCleanup) {
 
     EXPECT_EQ(raft::stats->buffer_alloc, raft::stats->buffer_free);
     EXPECT_EQ(raft::stats->call_alloc, raft::stats->call_free);
+}
+
+void lock_and_hold(std::mutex* mutex) {
+    std::unique_lock<std::mutex> lock(*mutex);
+    pthread_cleanup_push(locks::unlocker<decltype(lock)>, &lock);
+    for (;;) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    pthread_cleanup_pop(0);
+}
+
+TEST(Pthreads, CancelCleanup) {
+    std::mutex mutex;
+    std::thread holder(lock_and_hold, &mutex);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    ASSERT_TRUE(holder.joinable());
+    ASSERT_FALSE(pthread_cancel(holder.native_handle()));
+    holder.join();
+    bool acquired = mutex.try_lock();
+    EXPECT_TRUE(acquired);
+    if (acquired)
+        mutex.unlock();
 }

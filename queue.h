@@ -2,9 +2,13 @@
 #ifndef QUEUE_H
 #define QUEUE_H
 
+#include <pthread.h>
+
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
+
+#include "locks.h"
 
 namespace queue {
 
@@ -19,6 +23,7 @@ public:
     void put(T val)
     {
         std::unique_lock<Mutex> lock(mutex);
+        pthread_cleanup_push(locks::unlocker<decltype(lock)>, &lock);
         if (count == Capacity) {
             not_full.wait(lock, [&] () { return count < Capacity; });
         }
@@ -26,11 +31,13 @@ public:
         array[inc(head)] = val;
         ++count;
         not_empty.notify_one();
+        pthread_cleanup_pop(0);
     }
 
     T take()
     {
         std::unique_lock<Mutex> lock(mutex);
+        pthread_cleanup_push(locks::unlocker<decltype(lock)>, &lock);
         if (count == 0) {
             not_empty.wait(lock, [&] () { return count > 0; });
         }
@@ -39,6 +46,7 @@ public:
         --count;
         not_full.notify_one();
         return val;
+        pthread_cleanup_pop(0); // macro craziness here...
     }
 
     // not copyable
