@@ -19,12 +19,13 @@ using boost::interprocess::interprocess_mutex;
 using namespace raft;
 
 static void start_fsm_worker(RaftFSM* fsm);
-static void run_fsm_worker(RaftFSM* fsm);
+static void* run_fsm_worker(void* fsm);
+static void fsm_worker_step(RaftFSM* fsm);
 
-static void dispatch_fsm_apply(api::FSMApply::slot_t& slot);
-static void dispatch_fsm_apply_cmd(api::FSMApply::slot_t& slot);
-static void dispatch_fsm_snapshot(api::FSMSnapshot::slot_t& slot);
-static void dispatch_fsm_restore(api::FSMRestore::slot_t& slot);
+static void dispatch_fsm_apply(api::FSMApply::slot_t& slot, RaftFSM* fsm);
+static void dispatch_fsm_apply_cmd(api::FSMApply::slot_t& slot, RaftFSM* fsm);
+static void dispatch_fsm_snapshot(api::FSMSnapshot::slot_t& slot, RaftFSM* fsm);
+static void dispatch_fsm_restore(api::FSMRestore::slot_t& slot, RaftFSM* fsm);
 
 namespace {
 
@@ -45,8 +46,8 @@ void run_snapshot_job(const SnapshotJob& job);
 }
 
 static void init_err_msgs();
-static RaftFSM*    fsm;
-static std::thread fsm_worker;
+//static std::thread fsm_worker;
+static pthread_t fsm_worker;
 
 static std::vector<const char*> err_msgs;
 
@@ -71,7 +72,7 @@ RaftError raft_parse_argv(int argc, char *argv[], RaftConfig *cfg)
     return raft::parse_argv(argc, argv, *cfg);
 }
 
-pid_t raft_init(RaftFSM *fsm_, const RaftConfig *config_arg)
+pid_t raft_init(RaftFSM *fsm, const RaftConfig *config_arg)
 {
     init_err_msgs();
     RaftConfig config;
@@ -82,7 +83,6 @@ pid_t raft_init(RaftFSM *fsm_, const RaftConfig *config_arg)
     }
     raft::shm_init(config.shm_path, true, &config);
 
-    fsm = fsm_;
     raft::run_raft();
     zlog_info(shm_cat, "Started Raft process: pid %d.", raft_pid);
     start_fsm_worker(fsm);
@@ -93,12 +93,15 @@ pid_t raft_init(RaftFSM *fsm_, const RaftConfig *config_arg)
 
 void raft_cleanup()
 {
-    zlog_debug(fsm_cat, "Canceling FSM worker thread.");
-    if (fsm_worker.joinable()) {
-        if (pthread_cancel(fsm_worker.native_handle())) {
-            perror("Failed to cancel FSM worker thread");
-        }
-        fsm_worker.join();
+    zlog_debug(fsm_cat, "Closing FSM queue.");
+    //if (fsm_worker.joinable()) {
+    raft::scoreboard->fsm_queue.close();
+    //assert(fsm_worker.joinable());
+    //fsm_worker.join();
+    if (pthread_join(fsm_worker, nullptr)) {
+        zlog_fatal(fsm_cat, "Failed to join the FSM worker thread: %s",
+                   strerror(errno));
+        exit(1);
     }
     // TODO: look into cancellation behavior further
     if (snapshot_worker.joinable()) {
@@ -200,7 +203,9 @@ void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success)
     auto slot = (api::FSMSnapshot::slot_t*) s;
     {
         raft::mutex_lock l(slot->owned);
+        pthread_cleanup_push(locks::unlocker_checked<decltype(l)>, &l);
         slot->reply(success ? RAFT_SUCCESS : RAFT_E_OTHER);
+        pthread_cleanup_pop(0);
     }
 
     if (success) {
@@ -213,52 +218,66 @@ void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success)
 void start_fsm_worker(RaftFSM* fsm)
 {
     // check that there isn't already one started
-    assert(fsm_worker.get_id() == std::thread::id());
-    fsm_worker = std::thread(run_fsm_worker, fsm);
-}
-
-void run_fsm_worker(RaftFSM* fsm)
-{
-    zlog_debug(fsm_cat, "FSM worker starting.\n");
-    
-    for (;;) {
-        auto rec = scoreboard->fsm_queue.take();
-        CallTag tag = rec.first;
-        BaseSlot::pointer slot = rec.second;
-        raft::mutex_lock l(slot->owned);
-        pthread_cleanup_push(locks::unlocker_checked<decltype(l)>, &l);
-        slot->timings.record("FSM call received");
-        zlog_debug(msg_cat, "FSM call received, tag %d, call %p.",
-                   tag, rec.second.get());
-        assert(slot->state == raft::CallState::Pending);
-
-        switch (tag) {
-        case CallTag::FSMApply:
-            dispatch_fsm_apply((api::FSMApply::slot_t&) *slot);
-            break;
-        case CallTag::FSMSnapshot: {
-            l.unlock();
-            dispatch_fsm_snapshot((api::FSMSnapshot::slot_t&) *slot);
-        }
-            break;
-        case CallTag::FSMRestore:
-            dispatch_fsm_restore((api::FSMRestore::slot_t&) *slot);
-            break;
-        default:
-            zlog_fatal(msg_cat, "Unhandled call type: %d", tag);
-            abort();
-        }
-        pthread_cleanup_pop(0);
+    //assert(fsm_worker.get_id() == std::thread::id());
+    //fsm_worker = std::thread(run_fsm_worker, fsm);
+    if (pthread_create(&fsm_worker, nullptr, run_fsm_worker, fsm)) {
+        zlog_fatal(fsm_cat, "Failed to create FSM worker: %s",
+                   strerror(errno));
+        exit(1);
     }
 }
 
-void dispatch_fsm_apply(api::FSMApply::slot_t& slot)
+void* run_fsm_worker(void* fsm_p)
+{
+    RaftFSM* fsm = (RaftFSM*) fsm_p;
+    zlog_debug(fsm_cat, "FSM worker starting.\n");
+    
+    try {
+        for (;;) {
+            fsm_worker_step(fsm);
+        }
+    } catch (queue::queue_closed& e) {
+        zlog_debug(fsm_cat, "FSM worker exiting: queue closed.\n");
+        return nullptr;
+    }
+}
+
+static void fsm_worker_step(RaftFSM* fsm)
+{
+    auto rec = scoreboard->fsm_queue.take();
+    CallTag tag = rec.first;
+    BaseSlot::pointer slot = rec.second;
+    raft::mutex_lock l(slot->owned);
+    slot->timings.record("FSM call received");
+    zlog_debug(msg_cat, "FSM call received, tag %d, call %p.",
+               tag, rec.second.get());
+    assert(slot->state == raft::CallState::Pending);
+
+    switch (tag) {
+    case CallTag::FSMApply:
+        dispatch_fsm_apply((api::FSMApply::slot_t&) *slot, fsm);
+        break;
+    case CallTag::FSMSnapshot: {
+        l.unlock();
+        dispatch_fsm_snapshot((api::FSMSnapshot::slot_t&) *slot, fsm);
+    }
+        break;
+    case CallTag::FSMRestore:
+        dispatch_fsm_restore((api::FSMRestore::slot_t&) *slot, fsm);
+        break;
+    default:
+        zlog_fatal(msg_cat, "Unhandled call type: %d", tag);
+        abort();
+    }
+}
+
+void dispatch_fsm_apply(api::FSMApply::slot_t& slot, RaftFSM* fsm)
 {
     const LogEntry& log = slot.args;
 
     switch (log.log_type) {
     case RAFT_LOG_COMMAND:
-        dispatch_fsm_apply_cmd(slot);
+        dispatch_fsm_apply_cmd(slot, fsm);
         break;
     case RAFT_LOG_NOOP:
         zlog_info(msg_cat, "FSM command: noop");
@@ -275,7 +294,7 @@ void dispatch_fsm_apply(api::FSMApply::slot_t& slot)
     }
 }
 
-void dispatch_fsm_apply_cmd(api::FSMApply::slot_t& slot)
+void dispatch_fsm_apply_cmd(api::FSMApply::slot_t& slot, RaftFSM* fsm)
 {
     const LogEntry& log = slot.args;
     assert(log.data_buf);
@@ -290,13 +309,13 @@ void dispatch_fsm_apply_cmd(api::FSMApply::slot_t& slot)
     slot.reply((uintptr_t) response);
 }
 
-void dispatch_fsm_snapshot(api::FSMSnapshot::slot_t& slot)
+void dispatch_fsm_snapshot(api::FSMSnapshot::slot_t& slot, RaftFSM* fsm)
 {
     assert(strlen(slot.args.path) > 0);
     fsm->begin_snapshot(slot.args.path, &slot);
 }
 
-void dispatch_fsm_restore(api::FSMRestore::slot_t& slot)
+void dispatch_fsm_restore(api::FSMRestore::slot_t& slot, RaftFSM* fsm)
 {
     assert(strlen(slot.args.path) > 0);
     zlog_info(fsm_cat, "Passing restore request to FSM, path %s.",
@@ -315,11 +334,13 @@ void raft_fsm_take_snapshot(raft_snapshot_req req,
 
     auto* slot = (api::FSMSnapshot::slot_t*) req;
     std::unique_lock<decltype(snapshot_mutex)> lock(snapshot_mutex);
+    pthread_cleanup_push(locks::unlocker<decltype(lock)>, &lock);
     if (! snapshot_worker.joinable()) {
         snapshot_worker = std::thread(run_snapshot_worker);
     }
     snapshot_jobs.push_back(SnapshotJob { slot, h, f });
     snapshot_available.notify_one();
+    pthread_cleanup_pop(0);
 }
 
 namespace {
