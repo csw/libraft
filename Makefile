@@ -1,6 +1,9 @@
 makefile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
 make_dir := $(dir $(makefile_path))
 
+sources = $(wildcard *.cc)
+objs := $(patsubst %.cc,%.o,$(sources))
+
 uname := $(shell uname -s)
 
 ifeq ($(uname),Linux)
@@ -77,6 +80,9 @@ go-deps:
 
 -include $(patsubst %.cc,%.d,*.cc)
 
+# ensure the submodules get checked out
+$(objs): $(zlog_dir)
+
 libraft.a: libraft.a(raft_shm.o) libraft.a(raft_c_if.o) libraft.a(stats.o)
 	ranlib $@
 
@@ -91,7 +97,12 @@ test_suite: test.o libraft.a $(gtest_lib) $(zlog_lib)
 test: test_suite $(GO_PROG)
 	./test_suite
 
-$(zlog_lib):
+$(zlog_dir):
+	@echo "Checking out Git submodules..."
+	git submodule init
+	git submodule update
+
+$(zlog_lib): $(zlog_dir)
 	cd zlog/src && $(MAKE) libzlog.a
 
 $(gtest_lib):
