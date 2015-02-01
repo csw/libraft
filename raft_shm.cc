@@ -336,8 +336,14 @@ void shm_init(const char* path, bool create, const RaftConfig* config)
             perror("Problem with shared memory file");
             exit(1);
         }
-        shm = managed_mapped_file(boost::interprocess::create_only, 
-                                  path, config->shm_size);
+        try {
+            shm = managed_mapped_file(boost::interprocess::create_only, 
+                                      path, config->shm_size);
+        } catch (boost::interprocess::interprocess_exception& e) {
+            zlog_fatal(shm_cat, "Failed to open shared memory file %s: %s",
+                       path, e.what());
+            exit(1);
+        }
         zlog_debug(shm_cat, "Mapped shared memory file %s, %zd MB.",
                    path, config->shm_size / 1048576);
         scoreboard = shm.construct<Scoreboard>(unique_instance)();

@@ -236,8 +236,23 @@ TEST_F(RaftFixture, OnClose) {
 }
 
 TEST(RaftProcs, KillRaftDeathTest) {
-    ASSERT_DEATH({ RaftFixtureBase f; f.start(); wait_until_leader(); raft::kill_raft_(); sleep(5); },
-                 "exited");
+    ASSERT_DEATH({
+            RaftFixtureBase f;
+            f.start();
+            wait_until_leader();
+            raft::kill_raft_();
+            sleep(5);
+        },
+        "exited");
+}
+
+TEST(RaftProcs, BadSHMPathDeathTest) {
+    ASSERT_DEATH({
+            RaftFixtureBase f;
+            strncpy(f.config.shm_path, "/dev/whatever", 255);
+            f.start();
+        },
+        "shared memory");
 }
 
 TEST_F(RaftFixture, Restore) {
