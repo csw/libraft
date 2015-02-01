@@ -1,5 +1,4 @@
 #include <cstdint>
-#include <pthread.h>
 #include <sys/types.h>
 
 #include <chrono>
@@ -10,7 +9,6 @@
 
 #include "raft_c_if.h"
 #include "raft_shm.h"
-#include "locks.h"
 #include "stats.h"
 
 using boost::interprocess::anonymous_instance;
@@ -19,7 +17,7 @@ using boost::interprocess::interprocess_mutex;
 using namespace raft;
 
 static void start_fsm_worker(RaftFSM* fsm);
-static void* run_fsm_worker(void* fsm);
+static void run_fsm_worker(void* fsm);
 static void fsm_worker_step(RaftFSM* fsm);
 
 static void dispatch_fsm_apply(api::FSMApply::slot_t& slot, RaftFSM* fsm);
@@ -35,10 +33,8 @@ struct SnapshotJob {
     raft_fsm_snapshot_func    func;
 };
 
-std::deque<SnapshotJob> snapshot_jobs;
-std::mutex              snapshot_mutex;
-std::condition_variable snapshot_available;
-std::thread             snapshot_worker;
+queue::Deque<SnapshotJob> snapshot_queue;
+std::thread               snapshot_worker;
 
 void run_snapshot_worker();
 void run_snapshot_job(const SnapshotJob& job);
@@ -46,8 +42,7 @@ void run_snapshot_job(const SnapshotJob& job);
 }
 
 static void init_err_msgs();
-//static std::thread fsm_worker;
-static pthread_t fsm_worker;
+static std::thread fsm_worker;
 
 static std::vector<const char*> err_msgs;
 
@@ -74,6 +69,8 @@ RaftError raft_parse_argv(int argc, char *argv[], RaftConfig *cfg)
 
 pid_t raft_init(RaftFSM *fsm, const RaftConfig *config_arg)
 {
+    snapshot_queue.reset();
+
     init_err_msgs();
     RaftConfig config;
     if (config_arg) {
@@ -94,21 +91,16 @@ pid_t raft_init(RaftFSM *fsm, const RaftConfig *config_arg)
 void raft_cleanup()
 {
     zlog_debug(fsm_cat, "Closing FSM queue.");
-    //if (fsm_worker.joinable()) {
     raft::scoreboard->fsm_queue.close();
-    //assert(fsm_worker.joinable());
-    //fsm_worker.join();
-    if (pthread_join(fsm_worker, nullptr)) {
-        zlog_fatal(fsm_cat, "Failed to join the FSM worker thread: %s",
-                   strerror(errno));
-        exit(1);
-    }
-    // TODO: look into cancellation behavior further
+    assert(fsm_worker.joinable());
+    fsm_worker.join();
+    zlog_debug(fsm_cat, "FSM worker finished.");
+
+    zlog_debug(fsm_cat, "Closing snapshot queue.");
+    snapshot_queue.close();
     if (snapshot_worker.joinable()) {
-        if (pthread_cancel(snapshot_worker.native_handle())) {
-            perror("Failed to cancel snapshot worker thread");
-        }
         snapshot_worker.join();
+        zlog_debug(fsm_cat, "Snapshot worker finished.");
     }
     raft::shm_cleanup();
 }
@@ -175,7 +167,7 @@ raft_future raft_remove_peer(const char *host, uint16_t port)
 
 raft_future raft_shutdown()
 {
-    raft::shutdown_requested = true;
+    raft::scoreboard->shutdown_requested = true;
     return (raft_future) send_api_request<api::Shutdown>();
 }
 
@@ -198,14 +190,13 @@ void raft_future_dispose(raft_future f)
     slot->dispose();
 }
 
+// callback for FSM or snapshot thread
 void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success)
 {
     auto slot = (api::FSMSnapshot::slot_t*) s;
     {
         raft::mutex_lock l(slot->owned);
-        pthread_cleanup_push(locks::unlocker_checked<decltype(l)>, &l);
         slot->reply(success ? RAFT_SUCCESS : RAFT_E_OTHER);
-        pthread_cleanup_pop(0);
     }
 
     if (success) {
@@ -218,27 +209,21 @@ void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success)
 void start_fsm_worker(RaftFSM* fsm)
 {
     // check that there isn't already one started
-    //assert(fsm_worker.get_id() == std::thread::id());
-    //fsm_worker = std::thread(run_fsm_worker, fsm);
-    if (pthread_create(&fsm_worker, nullptr, run_fsm_worker, fsm)) {
-        zlog_fatal(fsm_cat, "Failed to create FSM worker: %s",
-                   strerror(errno));
-        exit(1);
-    }
+    assert(fsm_worker.get_id() == std::thread::id());
+    fsm_worker = std::thread(run_fsm_worker, fsm);
 }
 
-void* run_fsm_worker(void* fsm_p)
+static void run_fsm_worker(void* fsm_p)
 {
     RaftFSM* fsm = (RaftFSM*) fsm_p;
-    zlog_debug(fsm_cat, "FSM worker starting.\n");
+    zlog_debug(fsm_cat, "FSM worker starting.");
     
     try {
         for (;;) {
             fsm_worker_step(fsm);
         }
     } catch (queue::queue_closed& e) {
-        zlog_debug(fsm_cat, "FSM worker exiting: queue closed.\n");
-        return nullptr;
+        zlog_debug(fsm_cat, "FSM worker exiting: queue closed.");
     }
 }
 
@@ -333,30 +318,23 @@ void raft_fsm_take_snapshot(raft_snapshot_req req,
     assert(f);
 
     auto* slot = (api::FSMSnapshot::slot_t*) req;
-    std::unique_lock<decltype(snapshot_mutex)> lock(snapshot_mutex);
-    pthread_cleanup_push(locks::unlocker<decltype(lock)>, &lock);
     if (! snapshot_worker.joinable()) {
         snapshot_worker = std::thread(run_snapshot_worker);
     }
-    snapshot_jobs.push_back(SnapshotJob { slot, h, f });
-    snapshot_available.notify_one();
-    pthread_cleanup_pop(0);
+    snapshot_queue.emplace(SnapshotJob { slot, h, f });
 }
 
 namespace {
 
 void run_snapshot_worker()
 {
-    for (;;) {
-        std::unique_lock<decltype(snapshot_mutex)> lock(snapshot_mutex);
-        pthread_cleanup_push(locks::unlocker_checked<decltype(lock)>, &lock);
-        while (snapshot_jobs.empty())
-            snapshot_available.wait(lock);
-        const SnapshotJob job = snapshot_jobs.front();
-        snapshot_jobs.pop_front();
-        lock.unlock();
-        run_snapshot_job(job);
-        pthread_cleanup_pop(0);
+    try {
+        for (;;) {
+            const SnapshotJob job = snapshot_queue.take();
+            run_snapshot_job(job);
+        }
+    } catch (queue::queue_closed&) {
+        zlog_debug(fsm_cat, "Snapshot queue closed, worker exiting.");
     }
 }
 

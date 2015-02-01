@@ -1,8 +1,9 @@
+#include <atomic>
 #include <cinttypes>
 #include <cstdio>
 #include <getopt.h>
+#include <signal.h>
 #include <unistd.h>
-#include <pthread.h>
 #include <sys/wait.h>
 
 #include <list>
@@ -41,8 +42,8 @@ const struct option LONG_OPTS[] = {
     { "",         0,                 NULL, 0   }
 };
 
-std::mutex orphan_mutex;
-std::list<BaseSlot*> orphaned_calls;
+std::list<BaseSlot*> orphan_backlog;
+queue::Deque<BaseSlot*> orphaned_calls;
 
 std::thread raft_watcher;
 std::thread orphan_gc_thread;
@@ -51,6 +52,8 @@ uint64_t parse_size(const char *spec);
 std::vector<const char*> build_raft_argv(const RaftConfig& cfg);
 void watch_raft_proc(pid_t raft_pid);
 void run_orphan_gc();
+void scan_orphans(std::list<BaseSlot*>& calls);
+bool try_dispose_orphan(BaseSlot* orphan);
 void report_process_status(const char *desc, pid_t pid, int status);
 void init_client_allocators();
 void init_raft_allocators();
@@ -65,7 +68,6 @@ bool                msg_timing = false;
 pid_t               raft_pid;
 managed_mapped_file shm;
 Scoreboard*         scoreboard;
-bool                shutdown_requested = false;
 
 bool is_terminal(CallState state)
 {
@@ -112,7 +114,9 @@ NetworkAddr::NetworkAddr(const char* host_, uint16_t port_)
 }
 
 Scoreboard::Scoreboard()
-    : is_leader(false)
+    : is_leader(false),
+      shutdown_requested(false),
+      raft_killed(false)
 {}
 
 void Scoreboard::wait_for_raft(pid_t raft_pid)
@@ -132,34 +136,73 @@ bool in_shm_bounds(const void* ptr)
 
 void track_orphan(BaseSlot* slot)
 {
-    std::unique_lock<std::mutex> orphan_lock(orphan_mutex);
-    orphaned_calls.push_back(slot);
+    zlog_debug(msg_cat, "Enqueueing orphaned call: %p", slot);
+    orphaned_calls.put(slot);
 }
 
 namespace {
 
+const static auto orphan_interval = std::chrono::milliseconds(100);
+
 void run_orphan_gc()
 {
-    for (;;) {
-        std::unique_lock<std::mutex> orphan_lock(orphan_mutex);
-        pthread_cleanup_push(locks::unlocker<decltype(orphan_lock)>, &orphan_lock);
-        for (auto slot_i = orphaned_calls.begin();
-             slot_i != orphaned_calls.end();) {
-            auto& slot = **slot_i;
-            std::unique_lock<decltype(slot.owned)>
-                slot_lock(slot.owned, std::try_to_lock);
-
-            if (slot_lock && is_terminal(slot.state)) {
-                slot.dispose();
-                slot_i = orphaned_calls.erase(slot_i);
+    try {
+        zlog_debug(msg_cat, "Orphan GC thread started.");
+        orphan_backlog = decltype(orphan_backlog)();
+        auto next_check = std::chrono::system_clock::now() + orphan_interval;
+        
+        for (;;) {
+            BaseSlot* orphan;
+            if (orphan_backlog.empty()) {
+                orphan = orphaned_calls.take();
             } else {
-                ++slot_i;
+                auto res = orphaned_calls.poll_until(next_check);
+                orphan = res.first ? res.second : nullptr;
+            }
+
+            if (orphan && !try_dispose_orphan(orphan)) {
+                orphan_backlog.push_back(orphan);
+            }
+
+            if (!orphan_backlog.empty()
+                && std::chrono::system_clock::now() > next_check) {
+
+                // zlog_debug(msg_cat, "Scanning backlog of %lu orphans.",
+                //            orphan_backlog.size());
+                scan_orphans(orphan_backlog);
+                next_check = std::chrono::system_clock::now() + orphan_interval;
             }
         }
+    } catch (queue::queue_closed&) {
+        zlog_debug(msg_cat, "Orphan queue is closed, GC thread exiting.");
+        return;
+    }
+}
 
-        orphan_lock.unlock();
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        pthread_cleanup_pop(0);
+void scan_orphans(std::list<BaseSlot*>& calls)
+{
+    for (auto slot_i = calls.begin(); slot_i != calls.end();) {
+
+        BaseSlot* orphan = *slot_i;
+        if (try_dispose_orphan(orphan)) {
+            slot_i = calls.erase(slot_i);
+        } else {
+            ++slot_i;
+        }
+    }
+}
+
+bool try_dispose_orphan(BaseSlot* orphan)
+{
+    assert(orphan);
+    std::unique_lock<decltype(orphan->owned)>
+        slot_lock(orphan->owned, std::try_to_lock);
+    if (slot_lock && is_terminal(orphan->state)) {
+        // zlog_debug(msg_cat, "Disposing of terminal orphan: %p", orphan);
+        orphan->dispose();
+        return true;
+    } else {
+        return false;
     }
 }
 
@@ -302,6 +345,7 @@ void shm_init(const char* path, bool create, const RaftConfig* config)
         *shared_config = *config;
         strncpy(shared_config->shm_path, path, 255);
         init_client_allocators();
+        orphaned_calls.reset();
         zlog_debug(shm_cat, "Initialized shared memory and scoreboard.");
     } else {
         // Raft side
@@ -328,12 +372,11 @@ void shm_init(const char* path, bool create, const RaftConfig* config)
 
 void shm_cleanup()
 {
-    if (orphan_gc_thread.joinable()) {
-        if (pthread_cancel(orphan_gc_thread.native_handle())) {
-            perror("Failed to cancel orphan GC thread");
-        }
-        orphan_gc_thread.join();
-    }
+    scoreboard->api_queue.close();
+
+    orphaned_calls.close();
+    assert(orphan_gc_thread.joinable());
+    orphan_gc_thread.join();
     
     if (raft_watcher.joinable())
         raft_watcher.join();
@@ -371,7 +414,7 @@ pid_t run_raft()
 
 void orphan_cleanup(const ApplyArgs args)
 {
-    zlog_debug(shm_cat, "Cleaning up orphan Apply args.");
+    // zlog_debug(shm_cat, "Cleaning up orphan Apply args.");
     const char* raw_buf = (const char*) args.cmd_buf.get();
     if (in_shm_bounds((void*) raw_buf)) {
         free_raft_buffer(raw_buf);
@@ -416,6 +459,12 @@ void BaseSlot::wait()
     timings.record("result received");
 }
 
+int kill_raft_()
+{
+    scoreboard->raft_killed = true;
+    return kill(raft_pid, SIGTERM);
+}
+
 namespace {
 
 std::vector<const char*> build_raft_argv(const RaftConfig& cfg)
@@ -444,9 +493,13 @@ void watch_raft_proc(pid_t raft_pid)
             } else {
                 report_process_status("Raft process", raft_pid, status);
                 // TODO: bubble this back up to the client? recover?
-                if (shutdown_requested
+                if (scoreboard->shutdown_requested
                     && WIFEXITED(status)
                     && WEXITSTATUS(status) == 0) {
+                    return;
+                } else if (scoreboard->shutdown_requested
+                           && scoreboard->raft_killed) {
+                    zlog_warn(shm_cat, "Raft intentionally killed during shutdown!");
                     return;
                 } else {
                     exit(1);

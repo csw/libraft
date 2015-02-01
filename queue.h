@@ -5,14 +5,15 @@
 #include <pthread.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <stdexcept>
-
-#include "locks.h"
+#include <utility>
 
 using std::atomic;
+using std::chrono::time_point;
 
 namespace queue {
 
@@ -38,7 +39,6 @@ public:
     {
         check_closed();
         std::unique_lock<Mutex> lock(mutex);
-        pthread_cleanup_push(locks::unlocker_checked<decltype(lock)>, &lock);
         while (count == Capacity) {
             not_full.wait(lock);
             check_closed();
@@ -47,14 +47,12 @@ public:
         array[inc(head)] = val;
         ++count;
         not_empty.notify_one();
-        pthread_cleanup_pop(0);
     }
 
     T take()
     {
         check_closed();
         std::unique_lock<Mutex> lock(mutex);
-        pthread_cleanup_push(locks::unlocker_checked<decltype(lock)>, &lock);
         while (count == 0) {
             not_empty.wait(lock);
             check_closed();
@@ -64,10 +62,10 @@ public:
         --count;
         not_full.notify_one();
         return val;
-        pthread_cleanup_pop(0); // macro craziness here...
     }
 
-    void close() {
+    void close()
+    {
         std::unique_lock<Mutex> lock(mutex);
         closed = true;
         not_full.notify_all();
@@ -105,6 +103,98 @@ private:
     CV            not_empty;
     CV            not_full;
     atomic<bool>  closed { false };
+};
+
+template <typename T,
+          typename Mutex=std::timed_mutex,
+          typename CV=std::condition_variable_any>
+class Deque
+{
+public:
+    using lock_t = std::unique_lock<Mutex>;
+
+    Deque() = default;
+
+    void put(T val)
+    {
+        lock_t lock(mutex);
+        check_closed();
+        deque.push_back(val);
+        ready.notify_one();
+    }
+
+    template <typename ...Args>
+    void emplace(Args... args)
+    {
+        lock_t lock(mutex);
+        check_closed();
+        deque.emplace_back(args...);
+        ready.notify_one();
+    }
+
+    T take()
+    {
+        lock_t lock(mutex);
+        check_closed();
+        while (deque.empty()) {
+            ready.wait(lock);
+            check_closed();
+        }
+        T val = std::move(deque.front());
+        deque.pop_front();
+        return val;
+    }
+
+    template <typename Clock, typename Duration>
+    std::pair<bool, T> poll_until(const time_point<Clock, Duration>& end_time)
+    {
+        std::unique_lock<Mutex> lock(mutex, end_time);
+        if (lock) {
+            check_closed();
+            while (deque.empty()) {
+                if (ready.wait_until(lock, end_time) == std::cv_status::timeout) {
+                    return { false, T() };
+                }
+                check_closed();
+            }
+            T val = std::move(deque.front());
+            deque.pop_front();
+            return { true, val };
+        } else {
+            return { false, T() };
+        }
+    }
+
+    void close()
+    {
+        std::unique_lock<Mutex> lock(mutex);
+        closed = true;
+        ready.notify_all();
+    }
+
+    void reset()
+    {
+        std::unique_lock<Mutex> lock(mutex);
+        closed = false;
+        deque.clear();
+        ready.notify_all();
+    }
+
+    // not copyable
+    Deque(Deque&) = delete;
+    Deque& operator=(Deque&) = delete;
+
+private:
+    void check_closed()
+    {
+        if (closed)
+            throw queue_closed();
+    }
+
+    std::deque<T> deque;
+    Mutex         mutex;
+    CV            ready;
+    bool          closed = false;
 };
 
 }

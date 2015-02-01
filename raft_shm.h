@@ -2,6 +2,7 @@
 #ifndef RAFT_SHM_H
 #define RAFT_SHM_H
 
+#include <cstdio>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -51,7 +52,6 @@ extern zlog_category_t*    shm_cat;
 extern pid_t               raft_pid;
 extern managed_mapped_file shm;
 extern Scoreboard*         scoreboard;
-extern bool                shutdown_requested;
 
 enum class CallTag {
     Invalid, Apply, Barrier, VerifyLeader, 
@@ -155,8 +155,10 @@ public:
     using pointer = offset_ptr<BaseSlot>;
     using call_rec = std::pair<CallTag, BaseSlot::pointer>;
 
+protected:
     BaseSlot(CallTag tag);
 
+public:
     virtual ~BaseSlot() = default;
 
     interprocess_mutex       owned;
@@ -231,11 +233,13 @@ public:
         case ClientState::Observed:
             Call::allocator->deallocate_one(this);
             stats->call_free.inc();
+            //fprintf(stderr, "Deallocated call: %p\n", this);
             break;
         case ClientState::Abandoned:
             orphan_cleanup(args);
             Call::allocator->deallocate_one(this);
             stats->call_free.inc();
+            //fprintf(stderr, "Deallocated call: %p\n", this);
             break;
         }
     }
@@ -274,6 +278,9 @@ public:
     std::atomic<bool> is_raft_running;
     std::atomic<bool> is_leader;
 
+    std::atomic<bool> shutdown_requested;
+    std::atomic<bool> raft_killed;
+
     RaftConfig        config;
     
     // TODO: look at using boost::interprocess::message_queue
@@ -293,27 +300,36 @@ typename Call::slot_t* alloc_request_(Args... argv)
 }
 
 template <typename Call, typename... Args>
-typename Call::slot_t* send_request(CallQueue& queue, Args... argv)
+typename Call::slot_t* send_request(CallQueue& queue, bool throw_ok, Args... argv)
 {
     auto start_t = Timings::clock::now();
     auto* slot = alloc_request_<Call>(argv...);
     auto built_t = Timings::clock::now();
     slot->timings = Timings(start_t);
     slot->timings.record("constructed", built_t);
-    queue.put(slot->rec());
+    try {
+        queue.put(slot->rec());
+    } catch (queue::queue_closed&) {
+        if (throw_ok) {
+            throw;
+        } else {
+            slot->error = RAFT_E_IN_SHUTDOWN;
+            slot->state = CallState::Error;
+        }
+    }
     return slot;
 }
 
 template <typename Call, typename... Args>
 typename Call::slot_t* send_api_request(Args... argv)
 {
-    return send_request<Call, Args...>(scoreboard->api_queue, argv...);
+    return send_request<Call, Args...>(scoreboard->api_queue, false, argv...);
 }
 
 template <typename Call, typename... Args>
 typename Call::slot_t* send_fsm_request(Args... argv)
 {
-    return send_request<Call, Args...>(scoreboard->fsm_queue, argv...);
+    return send_request<Call, Args...>(scoreboard->fsm_queue, true, argv...);
 }
 
 template <typename Call, typename... Args>
@@ -352,6 +368,9 @@ void shm_cleanup();
  * To be called from the client after shm_init().
  */
 pid_t run_raft();
+
+//  Only really for testing!
+int kill_raft_();
 
 }
 

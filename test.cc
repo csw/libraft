@@ -1,3 +1,8 @@
+// mkdtemp(3) please
+#ifdef __linux
+#  define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <cassert>
 #include <chrono>
 #include <memory>
@@ -10,9 +15,11 @@
 
 #include "gtest/gtest.h"
 
+#include "raft_shm.h"
 #include "raft_c_if.h"
-#include "locks.h"
 #include "stats.h"
+
+using std::string;
 
 class FSM {
 public:
@@ -73,6 +80,7 @@ public:
         }
         if (scanned == 1) {
             count = val;
+            ++restores;
             return 0;
         } else {
             return 1;
@@ -82,8 +90,10 @@ public:
     int write_snapshot(raft_fsm_snapshot_handle handle, FILE* sink)
     {
         auto state = std::unique_ptr<uint32_t>((uint32_t*) handle);
+        std::this_thread::sleep_for(delay_us);
         int chars = fprintf(sink, "%u\n", *state);
         if (chars > 0) {
+            ++snapshots;
             return 0;
         } else {
             perror("Writing snapshot failed");
@@ -92,6 +102,8 @@ public:
     }
 
     uint32_t count = 0;
+    uint32_t snapshots = 0;
+    uint32_t restores = 0;
     std::chrono::microseconds delay_us;
 };
 
@@ -118,23 +130,39 @@ static int FSMWriteSnapshot(raft_fsm_snapshot_handle handle, FILE* sink)
 class RaftFixture : public ::testing::Test {
 public:
     RaftFixture()
+        : running(false)
     {
         fsm_instance = &fsm;
         raft_default_config(&config);
         config.EnableSingleNode = true;
-        raft_init(&fsm_rec, &config);
     }
 
     ~RaftFixture()
     {
+        if (running)
+            stop();
+    }
+
+    void start()
+    {
+        raft_init(&fsm_rec, &config);
+        running = true;
+    }
+
+    void stop()
+    {
+        fprintf(stderr, "RaftFixture::stop()\n");
+        assert(running);
         raft_future sf = raft_shutdown();
         raft_future_wait(sf);
         raft_cleanup();
+        running = false;
     }
 
-    DummyFSM fsm;
+    bool       running;
+    DummyFSM   fsm;
     RaftConfig config;
-    RaftFSM fsm_rec = { &FSMApply, &FSMBeginSnapshot, &FSMRestore };
+    RaftFSM    fsm_rec = { &FSMApply, &FSMBeginSnapshot, &FSMRestore };
 
 };
 
@@ -145,22 +173,105 @@ void wait_until_leader()
     }
 }
 
+void run_simple_op()
+{
+    char* buf = alloc_raft_buffer(256);
+    strncpy(buf, "Raft test suite op my spoon is too big", 256);
+    raft_future f = raft_apply_async(buf, 256, 0);
+    RaftError err = raft_future_wait(f);
+    ASSERT_EQ(err, RAFT_SUCCESS);
+    free_raft_buffer(buf);
+    raft_future_dispose(f);
+}
+
 TEST_F(RaftFixture, Simple) {
+    start();
     wait_until_leader();
 
-    for (int i = 0; i < 5; i++) {
-        char* buf = alloc_raft_buffer(256);
-        raft_future f = raft_apply_async(buf, 256, 0);
-        RaftError err = raft_future_wait(f);
-        ASSERT_EQ(err, RAFT_SUCCESS);
-        free_raft_buffer(buf);
-        raft_future_dispose(f);
+    const uint32_t ops = 5;
+    for (uint32_t i = 0; i < ops; i++) {
+        EXPECT_EQ(i, fsm.count);
+        run_simple_op();
     }
+    EXPECT_EQ(ops, fsm.count);
+
+    ASSERT_EQ(0, fsm.snapshots);
+    raft_future f = raft_snapshot();
+    RaftError err = raft_future_wait(f);
+    EXPECT_EQ(err, RAFT_SUCCESS);
+    EXPECT_EQ(1, fsm.snapshots);
+    raft_future_dispose(f);
+
     EXPECT_EQ(raft::stats->buffer_alloc, raft::stats->buffer_free);
     EXPECT_EQ(raft::stats->call_alloc, raft::stats->call_free);
 }
 
+TEST_F(RaftFixture, OnClose) {
+    start();
+    wait_until_leader();
+
+    raft_future f;
+    void* ptr;
+    char* buf = alloc_raft_buffer(256);
+    strncpy(buf, "oops", 255);
+    raft::scoreboard->api_queue.close();
+
+    EXPECT_EQ(RAFT_E_IN_SHUTDOWN, raft_apply(buf, 256, 0, &ptr));
+    f = raft_apply_async(buf, 256, 0);
+    EXPECT_EQ(RAFT_E_IN_SHUTDOWN, raft_future_wait(f));
+    f = raft_barrier(0);
+    EXPECT_EQ(RAFT_E_IN_SHUTDOWN, raft_future_wait(f));
+    f = raft_verify_leader();
+    EXPECT_EQ(RAFT_E_IN_SHUTDOWN, raft_future_wait(f));
+    f = raft_snapshot();
+    EXPECT_EQ(RAFT_E_IN_SHUTDOWN, raft_future_wait(f));
+    f = raft_shutdown();
+    EXPECT_EQ(RAFT_E_IN_SHUTDOWN, raft_future_wait(f));
+
+    // because the API queue is shut down, we can't send a normal
+    // shutdown request...
+    int res = raft::kill_raft_();
+    EXPECT_EQ(0, res);
+}
+
+TEST_F(RaftFixture, Restore) {
+    char raft_dir[256];
+    const char* tmpdir = getenv("TMPDIR");
+    snprintf(raft_dir, 255, "%s/raft_test_XXXXXX",
+             tmpdir ? tmpdir : "/tmp");
+    if (!mkdtemp(raft_dir)) {
+        perror("failed to create temp dir");
+        exit(1);
+    }
+    strncpy(config.base_dir, raft_dir, 255);
+
+    start();
+    wait_until_leader();
+
+    const uint32_t ops = 5;
+    for (uint32_t i = 0; i < ops; i++) {
+        EXPECT_EQ(i, fsm.count);
+        run_simple_op();
+    }
+    EXPECT_EQ(ops, fsm.count);
+
+    raft_future f = raft_snapshot();
+    RaftError err = raft_future_wait(f);
+    EXPECT_EQ(err, RAFT_SUCCESS);
+    EXPECT_EQ(1, fsm.snapshots);
+    raft_future_dispose(f);
+
+    stop();
+    fsm = DummyFSM();
+    start();
+    wait_until_leader();
+
+    EXPECT_EQ(ops, fsm.count);
+    EXPECT_EQ(1, fsm.restores);
+}
+
 TEST_F(RaftFixture, BadApply) {
+    start();
     wait_until_leader();
 
     raft_future f;
@@ -199,6 +310,7 @@ TEST_F(RaftFixture, BadApply) {
 }
 
 TEST_F(RaftFixture, NotLeaderYet) {
+    start();
     char* buf = alloc_raft_buffer(256);
     raft_future f = raft_apply_async(buf, 256, 0);
     RaftError err = raft_future_wait(f);
@@ -211,6 +323,7 @@ TEST_F(RaftFixture, AddRemovePeer) {
     raft_future f;
     RaftError err;
 
+    start();
     wait_until_leader();
 
     f = raft_add_peer(bogus, 21064);
@@ -242,6 +355,7 @@ TEST_F(RaftFixture, AddRemovePeer) {
 }
 
 TEST_F(RaftFixture, OrphanCleanup) {
+    start();
     wait_until_leader();
     fsm.delay_us = std::chrono::milliseconds(50);
 
@@ -251,6 +365,12 @@ TEST_F(RaftFixture, OrphanCleanup) {
         raft_future f = raft_apply_async(buf, 256, 0);
         raft_future_dispose(f);
     }
+
+    char* buf = alloc_raft_buffer(256);
+    raft_future f = raft_apply_async(buf, 256, 0);
+    EXPECT_EQ(RAFT_SUCCESS, raft_future_wait(f));
+    raft_future_dispose(f);
+    free_raft_buffer(buf);
     
     EXPECT_NE(raft::stats->buffer_alloc, raft::stats->buffer_free);
     EXPECT_NE(raft::stats->call_alloc, raft::stats->call_free);
@@ -259,26 +379,4 @@ TEST_F(RaftFixture, OrphanCleanup) {
 
     EXPECT_EQ(raft::stats->buffer_alloc, raft::stats->buffer_free);
     EXPECT_EQ(raft::stats->call_alloc, raft::stats->call_free);
-}
-
-void lock_and_hold(std::mutex* mutex) {
-    std::unique_lock<std::mutex> lock(*mutex);
-    pthread_cleanup_push(locks::unlocker<decltype(lock)>, &lock);
-    for (;;) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-    pthread_cleanup_pop(0);
-}
-
-TEST(Pthreads, CancelCleanup) {
-    std::mutex mutex;
-    std::thread holder(lock_and_hold, &mutex);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    ASSERT_TRUE(holder.joinable());
-    ASSERT_FALSE(pthread_cancel(holder.native_handle()));
-    holder.join();
-    bool acquired = mutex.try_lock();
-    EXPECT_TRUE(acquired);
-    if (acquired)
-        mutex.unlock();
 }
