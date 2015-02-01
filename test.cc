@@ -127,9 +127,9 @@ static int FSMWriteSnapshot(raft_fsm_snapshot_handle handle, FILE* sink)
     return fsm_instance->write_snapshot(handle, sink);
 }
 
-class RaftFixture : public ::testing::Test {
+class RaftFixtureBase {
 public:
-    RaftFixture()
+    RaftFixtureBase()
         : running(false)
     {
         fsm_instance = &fsm;
@@ -137,7 +137,7 @@ public:
         config.EnableSingleNode = true;
     }
 
-    ~RaftFixture()
+    ~RaftFixtureBase()
     {
         if (running)
             stop();
@@ -151,7 +151,7 @@ public:
 
     void stop()
     {
-        fprintf(stderr, "RaftFixture::stop()\n");
+        //fprintf(stderr, "RaftFixture::stop()\n");
         assert(running);
         raft_future sf = raft_shutdown();
         raft_future_wait(sf);
@@ -163,8 +163,9 @@ public:
     DummyFSM   fsm;
     RaftConfig config;
     RaftFSM    fsm_rec = { &FSMApply, &FSMBeginSnapshot, &FSMRestore };
-
 };
+
+class RaftFixture : public ::testing::Test, public RaftFixtureBase {};
 
 void wait_until_leader()
 {
@@ -232,6 +233,11 @@ TEST_F(RaftFixture, OnClose) {
     // shutdown request...
     int res = raft::kill_raft_();
     EXPECT_EQ(0, res);
+}
+
+TEST(RaftProcs, KillRaftDeathTest) {
+    ASSERT_DEATH({ RaftFixtureBase f; f.start(); wait_until_leader(); raft::kill_raft_(); sleep(5); },
+                 "exited");
 }
 
 TEST_F(RaftFixture, Restore) {
