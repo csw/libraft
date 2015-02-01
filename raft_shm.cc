@@ -338,7 +338,7 @@ void shm_init(const char* path, bool create, const RaftConfig* config)
         }
         shm = managed_mapped_file(boost::interprocess::create_only, 
                                   path, config->shm_size);
-        zlog_debug(shm_cat, "Mapped shared memory file %s, %llu MB.",
+        zlog_debug(shm_cat, "Mapped shared memory file %s, %zd MB.",
                    path, config->shm_size / 1048576);
         scoreboard = shm.construct<Scoreboard>(unique_instance)();
         RaftConfig* shared_config = shm.construct<RaftConfig>(unique_instance)();

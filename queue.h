@@ -102,7 +102,7 @@ private:
     Mutex         mutex;
     CV            not_empty;
     CV            not_full;
-    atomic<bool>  closed { false };
+    atomic<bool>  closed;
 };
 
 template <typename T,
