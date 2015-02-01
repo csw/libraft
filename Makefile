@@ -25,7 +25,7 @@ endif
 export CC
 export CXX
 
-GOPATH  = $(HOME)/go
+GOPATH ?= $(HOME)/go
 GO_LIB  = github.com/csw/raft_if
 GO_BIN  = $(GOPATH)/bin
 GO_PROG = $(GO_BIN)/raft_if
@@ -64,7 +64,14 @@ CGO_CPPFLAGS  = -I$(make_dir) $(CPPFLAGS)
 CGO_LDFLAGS  += -L$(make_dir) -lraft
 CGO_LDFLAGS  += $(make_dir)/$(zlog_dir)/libzlog.a $(LIBS)
 
-$(GO_PROG): $(GO_DIR)/raft_if.go $(GO_DIR)/raft_go_if.h \
+$(GOPATH)/src:
+	@echo "Go source directory not found for GOPATH=$(GOPATH)!" >&2
+	@exit 1
+
+$(GO_DIR): $(GOPATH)/src
+	go get -d $(GO_LIB)
+
+$(GO_PROG): $(GO_DIR) $(GO_DIR)/raft_if.go $(GO_DIR)/raft_go_if.h \
 		$(GO_DIR)/raft_go_if.cc libraft.a
 	go clean -i $(GO_LIB)
 	CGO_CPPFLAGS="$(CGO_CPPFLAGS)" \
