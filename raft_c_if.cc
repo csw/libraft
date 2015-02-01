@@ -124,14 +124,8 @@ raft_future raft_apply_async(char* cmd, size_t cmd_len, uint64_t timeout_ns)
 
 RaftError raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns, void **res)
 {
-    /*
-    if (cmd == nullptr || res == nullptr) {
+    if (res == nullptr)
         return RAFT_E_INVALID_ADDRESS;
-    } else if (! (in_shm_bounds((void*) cmd)
-                  && in_shm_bounds((void*) (cmd+cmd_len)))) {
-        return RAFT_E_INVALID_ADDRESS;
-    }
-    */
     raft_future f = raft_apply_async(cmd, cmd_len, timeout_ns);
     raft_future_wait(f);
     zlog_debug(msg_cat, "Result of call %p is ready.", f);
