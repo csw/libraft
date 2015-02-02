@@ -84,8 +84,6 @@ void init_raft_allocators();
 zlog_category_t*    msg_cat;
 zlog_category_t*    fsm_cat;
 zlog_category_t*    shm_cat;
-bool                msg_timing = false;
-
 pid_t               raft_pid;
 managed_mapped_file shm;
 Scoreboard*         scoreboard;
@@ -371,6 +369,8 @@ void shm_init(const char* path, bool create, const RaftConfig* config)
         RaftConfig* shared_config = shm.construct<RaftConfig>(unique_instance)();
         *shared_config = *config;
         strncpy(shared_config->shm_path, path, 255);
+        const char* timing_e = getenv("RAFT_TIMING");
+        scoreboard->msg_timing = (timing_e && *timing_e);
         init_client_allocators();
         orphaned_calls.reset();
         zlog_debug(shm_cat, "Initialized shared memory and scoreboard.");
@@ -595,7 +595,7 @@ void Timings::record(const char *tag, time_point t)
 
 void Timings::print()
 {
-    if (!msg_timing)
+    if (!scoreboard->msg_timing)
         return;
 
     if (n_entries <= 1) {
