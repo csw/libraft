@@ -4,6 +4,9 @@ make_dir := $(dir $(makefile_path))
 sources = $(wildcard *.cc)
 objs := $(patsubst %.cc,%.o,$(sources))
 
+test_sources = test.cc $(wildcard *_test.cc)
+test_objs := $(patsubst %.cc,%.o,$(test_sources))
+
 uname := $(shell uname -s)
 
 ifeq ($(uname),Linux)
@@ -55,7 +58,7 @@ binaries := raft_client test_suite
 
 .PHONY: all clean libclean test run_client go go-deps
 
-all: libraft.a $(binaries) $(GO_PROG)
+all: libraft.a $(binaries) $(GO_PROG) test_suite
 
 run_client: raft_client $(GO_PROG)
 	./raft_client --single -n 10
@@ -96,9 +99,9 @@ libraft.a: libraft.a(raft_shm.o) libraft.a(raft_c_if.o) libraft.a(stats.o)
 raft_client: raft_client.o libraft.a $(zlog_lib)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-test.o : CPPFLAGS := $(CPPFLAGS) -I$(gtest_dir)/include
+$(test_objs) : CPPFLAGS := $(CPPFLAGS) -I$(gtest_dir)/include
 
-test_suite: test.o libraft.a $(gtest_lib) $(zlog_lib)
+test_suite: $(test_objs) libraft.a $(gtest_lib) $(zlog_lib)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 test: test_suite $(GO_PROG)
