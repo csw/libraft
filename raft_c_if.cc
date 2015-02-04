@@ -165,6 +165,20 @@ raft_future raft_verify_leader()
     return (raft_future) send_api_request<api::VerifyLeader>();
 }
 
+RaftState   raft_state()
+{
+    raft_future f = send_api_request<api::GetState>();
+    RaftError err = raft_future_wait(f);
+    RaftState state;
+    if (!err) {
+        state = (RaftState) raft_future_get_value(f);
+    } else {
+        state = RAFT_INVALID_STATE;
+    }
+    raft_future_dispose(f);
+    return state;
+}
+
 raft_future raft_snapshot()
 {
     return (raft_future) send_api_request<api::Snapshot>();
@@ -192,6 +206,11 @@ RaftError raft_future_wait(raft_future f)
     slot->wait();
     slot->timings.print();
     return slot->error;
+}
+
+uint64_t  raft_future_get_value(raft_future f)
+{
+    return ((BaseSlot*)f)->value();
 }
 
 RaftError raft_future_get_ptr(raft_future f, void** value_ptr)

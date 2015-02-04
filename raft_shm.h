@@ -54,7 +54,8 @@ extern managed_mapped_file shm;
 extern Scoreboard*         scoreboard;
 
 enum class CallTag {
-    Invalid, Apply, Barrier, VerifyLeader, 
+    Invalid, Apply, Barrier, VerifyLeader,
+        GetState, LastContact, LastIndex, Leader,
         AddPeer, RemovePeer, SetPeers, Shutdown, Snapshot, 
         FSMApply=100, FSMSnapshot, FSMRestore };
 
@@ -186,6 +187,7 @@ public:
     virtual void dispose() = 0;
 
     virtual RaftError get_ptr(void **res) = 0;
+    virtual uint64_t value() = 0;
 };
 
 template <typename Call>
@@ -221,6 +223,13 @@ public:
         } else {
             return RAFT_E_INVALID_OP;
         }
+    }
+
+    uint64_t value()
+    {
+        // XXX: maybe don't assert here outside of testing?
+        assert(Call::has_ret);
+        return retval;
     }
     
     void dispose()

@@ -188,6 +188,7 @@ void run_simple_op()
 TEST_F(RaftFixture, Simple) {
     start();
     wait_until_leader();
+    EXPECT_EQ(RAFT_LEADER, raft_state());
 
     const uint32_t ops = 5;
     for (uint32_t i = 0; i < ops; i++) {
@@ -205,6 +206,12 @@ TEST_F(RaftFixture, Simple) {
 
     EXPECT_EQ(raft::stats->buffer_alloc, raft::stats->buffer_free);
     EXPECT_EQ(raft::stats->call_alloc, raft::stats->call_free);
+}
+
+TEST_F(RaftFixture, NoCluster) {
+    config.EnableSingleNode = false;
+    start();
+    EXPECT_EQ(RAFT_FOLLOWER, raft_state());
 }
 
 TEST_F(RaftFixture, OnClose) {

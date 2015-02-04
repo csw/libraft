@@ -9,6 +9,11 @@ extern "C" {
 #endif
 
 typedef struct {
+    char     host[64];
+    uint16_t port;
+} RaftAddr;
+
+typedef struct {
     char     shm_path[256];
     uint64_t shm_size;
     char     base_dir[256];
@@ -30,6 +35,16 @@ typedef struct {
 
     uint32_t RetainSnapshots;
 } RaftConfig;
+
+typedef uint64_t RaftIndex;
+
+typedef enum {
+    RAFT_INVALID_STATE,
+    RAFT_FOLLOWER,
+    RAFT_CANDIDATE,
+    RAFT_LEADER,
+    RAFT_SHUTDOWN
+} RaftState;
 
 typedef enum raft_log_type {
     RAFT_LOG_COMMAND,

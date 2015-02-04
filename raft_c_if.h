@@ -40,6 +40,7 @@
  */
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "raft_defs.h"
 
@@ -104,6 +105,44 @@ raft_future raft_barrier(uint64_t timeout_ns);
 
 raft_future raft_verify_leader();
 
+/**
+ * Return the state Raft is currently in.
+ *
+ * Synchronous.
+ *
+ * @retval State, or 0 (RAFT_INVALID_STATE) on error.
+ */
+RaftState   raft_state();
+
+/**
+ * Return the time of last contact by a leader.
+ *
+ * This only makes sense if we are currently a follower. Synchronous.
+ *
+ * @retval Time of last contact; 0 on error.
+ */
+time_t      raft_last_contact();
+
+/**
+ * Return the last index in stable storage.
+ *
+ * This is either from the last log or from the last
+ * snapshot. Synchronous.
+ *
+ * @retval Index, or 0 on error.
+ */
+RaftIndex   raft_last_index();
+
+/**
+ * Return the current leader of the cluster.
+ *
+ * @param [out] leader Address of a RaftAddr struct to hold the result.
+ *
+ * @retval RAFT_SUCCESS on success. RAFT_E_UNKNOWN_PEER if there is no
+ * current leader or the leader is unknown.
+ */
+RaftError   raft_leader(RaftAddr* leader);
+
 raft_future raft_snapshot();
 
 raft_future raft_shutdown();
@@ -118,7 +157,7 @@ raft_future raft_remove_peer(const char *host, uint16_t port);
 RaftError raft_future_wait(raft_future f);
 //int raft_future_wait_for(raft_future f, uint64_t wait_ms);
 RaftError raft_future_get_ptr(raft_future f, void** value_ptr);
-
+uint64_t  raft_future_get_value(raft_future f);
 /**
  * Dispose of resources held by a raft_future.
  */
