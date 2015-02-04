@@ -165,7 +165,7 @@ raft_future raft_verify_leader()
     return (raft_future) send_api_request<api::VerifyLeader>();
 }
 
-RaftState   raft_state()
+RaftState raft_state()
 {
     raft_future f = send_api_request<api::GetState>();
     RaftError err = raft_future_wait(f);
@@ -177,6 +177,20 @@ RaftState   raft_state()
     }
     raft_future_dispose(f);
     return state;
+}
+
+time_t raft_last_contact()
+{
+    raft_future f = send_api_request<api::GetState>();
+    RaftError err = raft_future_wait(f);
+    time_t last_contact;
+    if (!err) {
+        last_contact = (time_t) raft_future_get_value(f);
+    } else {
+        last_contact = 0;
+    }
+    raft_future_dispose(f);
+    return last_contact;
 }
 
 raft_future raft_snapshot()

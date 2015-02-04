@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string>
 #include <thread>
+#include <time.h>
 #include <unistd.h>
 
 #include "gtest/gtest.h"
@@ -185,10 +186,24 @@ void run_simple_op()
     raft_future_dispose(f);
 }
 
+//const static time_t RECENT = 1423090205;
+
 TEST_F(RaftFixture, Simple) {
     start();
     wait_until_leader();
     EXPECT_EQ(RAFT_LEADER, raft_state());
+
+    // XXX: getting 3 seconds past the epoch... :p
+    EXPECT_LT(raft_last_contact(), 86400);
+    // XXX: this would work in a functioning cluster, I guess...
+
+    // time_t now = time(nullptr);
+    // time_t last_contact = raft_last_contact();
+    // printf("Last contact at: (%ld) %s",
+    //        last_contact, ctime(&last_contact));
+    // EXPECT_GT(last_contact, RECENT);
+    // int64_t delta = abs(now - last_contact);
+    // EXPECT_LT(delta, 20);
 
     const uint32_t ops = 5;
     for (uint32_t i = 0; i < ops; i++) {
