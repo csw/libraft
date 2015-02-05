@@ -60,6 +60,8 @@ std::thread               snapshot_worker;
 void run_snapshot_worker();
 void run_snapshot_job(const SnapshotJob& job);
 
+RaftError raft_future_get(raft_future f, uint64_t* res);
+
 }
 
 static void init_err_msgs();
@@ -193,6 +195,35 @@ time_t raft_last_contact()
     return last_contact;
 }
 
+RaftIndex raft_last_index()
+{
+    raft_future f = send_api_request<api::LastIndex>();
+    uint64_t idx;
+    RaftError err = raft_future_get(f, &idx);
+    if (!err) {
+        return idx;
+    } else {
+        zlog_error(msg_cat, "LastIndex call failed: %s",
+                   raft_err_msg(err));
+        return 0;
+    }
+}
+
+RaftError raft_leader(char** res)
+{
+    if (res == nullptr)
+        return RAFT_E_INVALID_ADDRESS;
+
+    raft_future f = send_api_request<api::GetLeader>();
+    uint64_t pval;
+    RaftError err = raft_future_get(f, &pval);
+    if (!err) {
+        assert(pval);
+        *res = (char*) raft::shm.get_address_from_handle((shm_handle) pval);
+    }        
+    return err;
+}
+
 raft_future raft_snapshot()
 {
     return (raft_future) send_api_request<api::Snapshot>();
@@ -230,6 +261,22 @@ uint64_t  raft_future_get_value(raft_future f)
 RaftError raft_future_get_ptr(raft_future f, void** value_ptr)
 {
     return ((BaseSlot*)f)->get_ptr(value_ptr);
+}
+
+namespace {
+
+RaftError raft_future_get(raft_future f, uint64_t* res)
+{
+    assert(res);
+    RaftError err = raft_future_wait(f);
+    auto slot = ((BaseSlot*)f);
+    if (!err) {
+        *res = slot->value();
+    }
+    raft_future_dispose(f);
+    return err;
+}
+
 }
 
 void raft_future_dispose(raft_future f)

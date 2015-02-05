@@ -55,7 +55,7 @@ extern Scoreboard*         scoreboard;
 
 enum class CallTag {
     Invalid, Apply, Barrier, VerifyLeader,
-        GetState, LastContact, LastIndex, Leader,
+        GetState, LastContact, LastIndex, GetLeader,
         AddPeer, RemovePeer, SetPeers, Shutdown, Snapshot, 
         FSMApply=100, FSMSnapshot, FSMRestore };
 

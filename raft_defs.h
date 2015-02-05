@@ -9,11 +9,6 @@ extern "C" {
 #endif
 
 typedef struct {
-    char     host[64];
-    uint16_t port;
-} RaftAddr;
-
-typedef struct {
     char     shm_path[256];
     uint64_t shm_size;
     char     base_dir[256];

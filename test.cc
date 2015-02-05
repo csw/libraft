@@ -192,6 +192,11 @@ TEST_F(RaftFixture, Simple) {
     start();
     wait_until_leader();
     EXPECT_EQ(RAFT_LEADER, raft_state());
+    char *leader = nullptr;
+    RaftError err = raft_leader(&leader);
+    EXPECT_EQ(RAFT_SUCCESS, err);
+    if (leader)
+        EXPECT_STREQ("127.0.0.1:9001", leader);
 
     // XXX: getting 3 seconds past the epoch... :p
     EXPECT_LT(raft_last_contact(), 86400);
@@ -206,15 +211,17 @@ TEST_F(RaftFixture, Simple) {
     // EXPECT_LT(delta, 20);
 
     const uint32_t ops = 5;
+    const auto start_idx = raft_last_index();
     for (uint32_t i = 0; i < ops; i++) {
         EXPECT_EQ(i, fsm.count);
         run_simple_op();
     }
     EXPECT_EQ(ops, fsm.count);
+    EXPECT_GE(raft_last_index(), start_idx + ops);
 
     ASSERT_EQ(0, fsm.snapshots);
     raft_future f = raft_snapshot();
-    RaftError err = raft_future_wait(f);
+    err = raft_future_wait(f);
     EXPECT_EQ(err, RAFT_SUCCESS);
     EXPECT_EQ(1, fsm.snapshots);
     raft_future_dispose(f);

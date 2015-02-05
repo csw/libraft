@@ -136,12 +136,14 @@ RaftIndex   raft_last_index();
 /**
  * Return the current leader of the cluster.
  *
- * @param [out] leader Address of a RaftAddr struct to hold the result.
+ * @param [out] buf A pointer to a C string containing the leader's
+ * address will be placed in the destination of buf. The caller is
+ * responsible for freeing this string via free_raft_buffer().
  *
  * @retval RAFT_SUCCESS on success. RAFT_E_UNKNOWN_PEER if there is no
  * current leader or the leader is unknown.
  */
-RaftError   raft_leader(RaftAddr* leader);
+RaftError   raft_leader(char** buf);
 
 raft_future raft_snapshot();
 
@@ -158,6 +160,7 @@ RaftError raft_future_wait(raft_future f);
 //int raft_future_wait_for(raft_future f, uint64_t wait_ms);
 RaftError raft_future_get_ptr(raft_future f, void** value_ptr);
 uint64_t  raft_future_get_value(raft_future f);
+
 /**
  * Dispose of resources held by a raft_future.
  */
