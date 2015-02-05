@@ -80,7 +80,9 @@ void raft_fsm_take_snapshot(raft_snapshot_req req,
 // Top half; client side
 
 void raft_default_config(RaftConfig *cfg);
-RaftError raft_parse_argv(int argc, char *argv[], RaftConfig *cfg);
+const struct option* raft_getopt_long_opts();
+bool is_raft_option(int optval);
+int raft_apply_option(RaftConfig *cfg, int option, const char* arg);
 pid_t raft_init(RaftFSM *fsm, const RaftConfig *cfg);
 void raft_cleanup();
 

@@ -83,11 +83,28 @@ void raft_default_config(RaftConfig *cfg)
     *cfg = raft::default_config();
 }
 
-RaftError raft_parse_argv(int argc, char *argv[], RaftConfig *cfg)
+const struct option* raft_getopt_long_opts()
 {
-    if (!cfg || !argv)
-        return RAFT_E_INVALID_ADDRESS;
-    return raft::parse_argv(argc, argv, *cfg);
+    return raft::arg::LONG_OPTS;
+}
+
+bool is_raft_option(int optkey)
+{
+    return raft::arg::is_valid(optkey);
+}
+
+int raft_apply_option(RaftConfig *cfg, int option, const char* arg)
+{
+    if (!cfg) {
+        zlog_error(client_cat, "Config pointer is null!");
+        return 1;
+    }
+    if (! raft::arg::is_valid(option)) {
+        zlog_error(client_cat, "Invalid option flag: %d", option);
+        return 1;
+    }
+
+    return raft::arg::apply(*cfg, (arg::Getopt) option, arg);
 }
 
 pid_t raft_init(RaftFSM *fsm, const RaftConfig *config_arg)

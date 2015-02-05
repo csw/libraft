@@ -3,6 +3,7 @@
 #define RAFT_SHM_H
 
 #include <cstdio>
+#include <getopt.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -41,14 +42,28 @@ using mutex_lock = std::unique_lock<boost::interprocess::interprocess_mutex>;
 
 class Scoreboard;
 
-// TODO: add knobs for these
 const static char SHM_PATH[] = "/tmp/raft_shm";
 const static size_t SHM_SIZE = 64 * 1024 * 1024;
+
+namespace arg {
+
+enum Getopt {
+    ShmPath=0xb0000, ShmSize, Dir, Port, Single, Peers,
+    END_OPTS
+};
+
+bool is_valid(int optkey);
+
+extern const struct option LONG_OPTS[];
+
+int apply(RaftConfig& config, Getopt option, const char *arg);
+
+}
 
 extern zlog_category_t*    msg_cat;
 extern zlog_category_t*    fsm_cat;
 extern zlog_category_t*    shm_cat;
-
+extern zlog_category_t*    client_cat;
 extern pid_t               raft_pid;
 extern managed_mapped_file shm;
 extern Scoreboard*         scoreboard;
@@ -358,8 +373,6 @@ void track_orphan(BaseSlot* slot);
 // Startup, shutdown, etc.
 
 RaftConfig default_config();
-
-RaftError parse_argv(int argc, char *argv[], RaftConfig &config);
 
 /**
  * Set up shared memory and any resident resources.

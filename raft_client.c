@@ -33,7 +33,12 @@ static unsigned        snapshot_period = 0;
 static struct timespec delay = { 1, 0 }; // 1 second
 static bool            interactive = false;
 
-void  parse_opts(int argc, char *argv[]);
+int   parse_opts(RaftConfig *config, int argc, char *argv[]);
+struct option* merge_opts(const struct option *a, const struct option *b);
+int   count_opts(const struct option *opts);
+void  print_help(char *argv[]);
+void  print_opt_summary(const struct option *opt);
+void  print_opt_desc(const struct option *opt);
 int   write_snapshot(raft_fsm_snapshot_handle handle, FILE* sink);
 
 void  run_auto();
@@ -123,27 +128,57 @@ int write_snapshot(raft_fsm_snapshot_handle handle, FILE* sink)
 
 // Client code
 
-void parse_opts(int argc, char *argv[])
+const struct option LONG_OPTS[] = {
+    {  "runs",         required_argument,  NULL,  'r'  },
+    {  "snapshots",    required_argument,  NULL,  's'  },
+    {  "wait",         required_argument,  NULL,  'w'  },
+    {  "interactive",  no_argument,        NULL,  'i'  },
+    {  "help",         no_argument,        NULL,  'h'  },
+    {  "",             0,                  NULL,  0    }
+};
+
+RaftFSM fsm_def = { &FSMApply, &FSMBeginSnapshot, &FSMRestore };
+
+int main(int argc, char *argv[])
 {
-    while (true) {
-        int c = getopt(argc, argv, "n:s:w:i");
-        if (c == -1)
-            break;
-        switch (c) {
-        case 'n':
-            runs = strtoul(optarg, NULL, 10);
-            break;
-        case 's':
-            snapshot_period = strtoul(optarg, NULL, 10);
-            break;
-        case 'w':
-            delay.tv_nsec = strtoul(optarg, NULL, 10) * 1000;
-            break;
-        case 'i':
-            interactive = true;
-            break;
-        }
+    fprintf(stderr, "Raft client starting.\n");
+    RaftConfig config;
+    raft_default_config(&config);
+    int rc = parse_opts(&config, argc, argv);
+    switch (rc) {
+    case 0:  // OK
+        break;
+    case -1: // error with args
+        print_help(argv);
+        return 2;
+    case -2: // internal error
+        return 1;
+    case -3: // help
+        print_help(argv);
+        return 0;
     }
+
+    raft_init(&fsm_def, &config);
+    cat = zlog_get_category("client");
+
+    parse_opts(&config, argc, argv);
+
+    while (! raft_is_leader()) {
+        sleep(1);
+    }
+
+    if (interactive) {
+        run_interactive();
+    } else {
+        run_auto();
+    }
+
+    raft_future sf = raft_shutdown();
+    raft_future_wait(sf);
+    printf("Raft is shut down.\n");
+    raft_cleanup();
+
+    return 0;
 }
 
 void run_auto()
@@ -223,35 +258,124 @@ void take_snapshot()
     raft_future_dispose(sf);
 }
 
-RaftFSM fsm_def = { &FSMApply, &FSMBeginSnapshot, &FSMRestore };
+// Option handling
 
-int main(int argc, char *argv[])
+int parse_opts(RaftConfig *config, int argc, char *argv[])
 {
-    fprintf(stderr, "Raft client starting.\n");
-    RaftConfig config;
-    if (raft_parse_argv(argc, argv, &config)) {
-        fprintf(stderr, "libraft error parsing args!\n");
-        exit(1);
+    struct option *combined = merge_opts(LONG_OPTS, raft_getopt_long_opts());
+    if (!combined) {
+        return -2;
     }
-    raft_init(&fsm_def, &config);
-    cat = zlog_get_category("client");
+    int rc = 0;
 
-    parse_opts(argc, argv);
-
-    while (! raft_is_leader()) {
-        sleep(1);
+    while (true) {
+        int optionIdx;
+        int c = getopt_long(argc, argv, "n:s:w:i", combined, &optionIdx);
+        if (c == -1)
+            break; // end option processing
+        if (is_raft_option(c)) {
+            raft_apply_option(config, c, optarg);
+        } else {
+            switch (c) {
+            case 'n':
+                runs = strtoul(optarg, NULL, 10);
+                break;
+            case 's':
+                snapshot_period = strtoul(optarg, NULL, 10);
+                break;
+            case 'w': {
+                unsigned long usec = strtoul(optarg, NULL, 10);
+                unsigned long secs = usec / 1000000;
+                unsigned long nanos = (usec % 1000000) * 1000;
+                delay.tv_sec  = secs;
+                delay.tv_nsec = nanos;
+                break;
+            }
+            case 'i':
+                interactive = true;
+                break;
+            case 'h':
+                rc = -3;
+                goto cleanup;
+            case ':':
+            case '?':
+                // getopt_long is supposed to print useful messages here...
+                rc = -1;
+                goto cleanup;
+            default:
+                zlog_error(cat, "Unexpected flag %d for %s",
+                           c, argv[optind]);
+                rc = -1;
+                goto cleanup;
+            }
+        }
     }
 
-    if (interactive) {
-        run_interactive();
-    } else {
-        run_auto();
+cleanup:
+    free(combined);
+    return rc;
+}
+
+void print_help(char *argv[])
+{
+    fprintf(stderr, "usage: %s [options]\n", argv[0]);
+    fprintf(stderr, "Client options:\n");
+    print_opt_summary(LONG_OPTS);
+    fprintf(stderr, "Raft options:\n");
+    print_opt_summary(raft_getopt_long_opts());
+}
+
+void print_opt_summary(const struct option *opt)
+{
+    while (opt->name[0]) {
+        print_opt_desc(opt);
+        ++opt;
     }
+}
 
-    raft_future sf = raft_shutdown();
-    raft_future_wait(sf);
-    printf("Raft is shut down.\n");
-    raft_cleanup();
+void print_opt_desc(const struct option *opt)
+{
+    switch (opt->has_arg) {
+    case no_argument:
+        fprintf(stderr, "  --%s\n", opt->name);
+        break;
+    case required_argument:
+        fprintf(stderr, "  --%s=ARG\n", opt->name);
+        break;
+    case optional_argument:
+        fprintf(stderr, "  --%s[=ARG]\n", opt->name);
+        break;
+    default:
+        assert(false && "invalid argument condition!");
+    }
+}
 
-    return 0;
+
+struct option* merge_opts(const struct option *a, const struct option *b)
+{
+    const int n_a = count_opts(a);
+    assert(n_a >= 0);
+    const int n_b = count_opts(b);
+    assert(n_b >= 0);
+    struct option *dest =
+        (struct option*) malloc((n_a+n_b+1)*sizeof(struct option));
+    if (!dest) {
+        perror("malloc failed");
+        // WTF
+        //zlog_error(cat, "malloc failed for options: %s", strerror(errno));
+        return NULL;
+    }
+    memcpy(dest, a, n_a*sizeof(struct option));
+    memcpy(dest+n_a, b, (n_b+1)*sizeof(struct option));
+    return dest;
+}
+
+int count_opts(const struct option *op)
+{
+    int i = 0;
+    for (; i < 256; ++i) {
+        if (*op[i].name == '\0')
+            break;
+    }
+    return (i < 256) ? i : -1;
 }

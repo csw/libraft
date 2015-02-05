@@ -50,18 +50,21 @@ namespace api {
 
 }
 
-namespace {
+namespace arg {
 
 const struct option LONG_OPTS[] = {
-    { "shm-path", required_argument, NULL, 'm' },
-    { "shm-size", required_argument, NULL, 'M' },
-    { "dir",      required_argument, NULL, 'd' },
-    { "p",        required_argument, NULL, 'p' },
-    { "port",     required_argument, NULL, 'p' },
-    { "single",   no_argument,       NULL, 's' },
-    { "peers",    required_argument, NULL, 'P' },
+    { "shm-path", required_argument, NULL, arg::ShmPath },
+    { "shm-size", required_argument, NULL, arg::ShmSize },
+    { "dir",      required_argument, NULL, arg::Dir },
+    { "port",     required_argument, NULL, arg::Port },
+    { "single",   no_argument,       NULL, arg::Single },
+    { "peers",    required_argument, NULL, arg::Peers },
     { "",         0,                 NULL, 0   }
 };
+
+}
+
+namespace {
 
 std::list<BaseSlot*> orphan_backlog;
 queue::Deque<BaseSlot*> orphaned_calls;
@@ -84,6 +87,7 @@ void init_raft_allocators();
 zlog_category_t*    msg_cat;
 zlog_category_t*    fsm_cat;
 zlog_category_t*    shm_cat;
+zlog_category_t*    client_cat;
 pid_t               raft_pid;
 managed_mapped_file shm;
 Scoreboard*         scoreboard;
@@ -256,46 +260,42 @@ uint64_t parse_size(const char *spec)
 
 }
 
-RaftError parse_argv(int argc, char *argv[], RaftConfig &cfg)
+bool arg::is_valid(int option)
 {
-    cfg = default_config();
+    return (option >= ShmPath && option < END_OPTS);
+}
 
-    int opterr_old = opterr;
-    opterr = 0;
 
-    while (true) {
-        int optionIdx;
-        int c = getopt_long(argc, argv, "d:p:s", LONG_OPTS, &optionIdx);
-        if (c == -1)
-            break;
-        switch (c) {
-        case 'm':
-            strncpy(cfg.shm_path, optarg, 255);
-            break;
-        case 'M':
-            cfg.shm_size = parse_size(optarg);
-            break;
-        case 'd': // Raft dir
-            strncpy(cfg.base_dir, optarg, 255);
-            break;
-        case 'p': // port
-            cfg.listen_port = atoi(optarg);
-            break;
-        case 's': // single-node
-            cfg.EnableSingleNode = true;
-            break;
-        case 'P': // peers
-            strncpy(cfg.peers, optarg, 255);
-            break;
-        case '?': // unknown arg
-            opterr = opterr_old;
-            optind = optind-1;
-            return RAFT_SUCCESS;
-        }
+int arg::apply(RaftConfig& cfg, Getopt option, const char *arg)
+{
+    switch (option) {
+    case arg::ShmPath:
+        assert(arg);
+        strncpy(cfg.shm_path, arg, 255);
+        break;
+    case arg::ShmSize:
+        assert(arg);
+        cfg.shm_size = parse_size(arg);
+        break;
+    case arg::Dir:
+        assert(arg);
+        strncpy(cfg.base_dir, arg, 255);
+        break;
+    case arg::Port:
+        assert(arg);
+        cfg.listen_port = atoi(arg);
+        break;
+    case arg::Single:
+        cfg.EnableSingleNode = true;
+        break;
+    case arg::Peers:
+        assert(arg);
+        strncpy(cfg.peers, arg, 255);
+        break;
+    default:
+        assert(false && "unhandled config flag");
     }
-
-    opterr = opterr_old;
-    return RAFT_SUCCESS;
+    return 0;
 }
 
 RaftConfig default_config()
