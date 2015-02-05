@@ -372,6 +372,12 @@ void BaseSlot::wait()
     timings.record("result received");
 }
 
+bool BaseSlot::poll()
+{
+    std::unique_lock<interprocess_mutex> lock(owned, std::try_to_lock);
+    return lock && is_terminal(state);
+}
+
 int kill_raft_()
 {
     scoreboard->raft_killed = true;

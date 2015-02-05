@@ -270,6 +270,16 @@ RaftError raft_future_wait(raft_future f)
     return slot->error;
 }
 
+bool raft_future_poll(raft_future f)
+{
+    return ((BaseSlot*) f)->poll();
+}
+
+bool raft_future_wait_for(raft_future f, uint64_t wait_ms)
+{
+    return ((BaseSlot*) f)->wait_for(std::chrono::milliseconds(wait_ms));
+}
+
 uint64_t  raft_future_get_value(raft_future f)
 {
     return ((BaseSlot*)f)->value();

@@ -181,7 +181,7 @@ void run_simple_op()
     strncpy(buf, "Raft test suite op my spoon is too big", 256);
     raft_future f = raft_apply_async(buf, 256, 0);
     RaftError err = raft_future_wait(f);
-    ASSERT_EQ(err, RAFT_SUCCESS);
+    ASSERT_EQ(RAFT_SUCCESS, err);
     free_raft_buffer(buf);
     raft_future_dispose(f);
 }
@@ -222,12 +222,29 @@ TEST_F(RaftFixture, Simple) {
     ASSERT_EQ(0, fsm.snapshots);
     raft_future f = raft_snapshot();
     err = raft_future_wait(f);
-    EXPECT_EQ(err, RAFT_SUCCESS);
+    EXPECT_EQ(RAFT_SUCCESS, err);
+    EXPECT_EQ(true, raft_future_poll(f));
+    EXPECT_EQ(true, raft_future_wait_for(f, 0));
+    EXPECT_EQ(true, raft_future_wait_for(f, 5));
     EXPECT_EQ(1, fsm.snapshots);
     raft_future_dispose(f);
 
     EXPECT_EQ(raft::stats->buffer_alloc, raft::stats->buffer_free);
     EXPECT_EQ(raft::stats->call_alloc, raft::stats->call_free);
+}
+
+TEST_F(RaftFixture, DoubleWait) {
+    start();
+    wait_until_leader();
+
+    char* buf = alloc_raft_buffer(256);
+    strncpy(buf, "Raft test suite op my spoon is too big", 256);
+    raft_future f = raft_apply_async(buf, 256, 0);
+    RaftError err = raft_future_wait(f);
+    ASSERT_EQ(RAFT_SUCCESS, err);
+    ASSERT_EQ(RAFT_SUCCESS, raft_future_wait(f));
+    free_raft_buffer(buf);
+    raft_future_dispose(f);
 }
 
 TEST_F(RaftFixture, NoCluster) {

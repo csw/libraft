@@ -21,6 +21,8 @@
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 
+#include <boost/date_time/posix_time/posix_time_types.hpp>
+
 #include "zlog/src/zlog.h"
 
 #include "queue.h"
@@ -185,6 +187,10 @@ public:
     void reply(uint64_t retval);
 
     void wait();
+    bool poll();
+    template <typename Rep, typename Period>
+    bool wait_for(const std::chrono::duration<Rep, Period>& rel_time);
+
     virtual void dispose() = 0;
 
     virtual RaftError get_ptr(void **res) = 0;
@@ -378,6 +384,39 @@ pid_t run_raft();
 //  Only really for testing!
 int kill_raft_();
 
+// template functions etc.
+
+template <typename Rep, typename Period>
+boost::posix_time::ptime
+make_ptime(const std::chrono::duration<Rep, Period>& duration);
+
+template <typename Rep, typename Period>
+bool BaseSlot::wait_for(const std::chrono::duration<Rep, Period>& rel_time)
+{
+    if (rel_time.count() == 0)
+        return poll();
+
+    // Boost contortions...
+    bool locked = owned.timed_lock(make_ptime(rel_time));
+    if (locked) {
+        std::unique_lock<interprocess_mutex> lock(owned, std::adopt_lock);
+        return is_terminal(state);
+    } else {
+        return false;
+    }
 }
+
+using namespace std::chrono;
+
+template <typename Rep, typename Period>
+boost::posix_time::ptime
+make_ptime(const duration<Rep, Period>& duration)
+{
+    auto usec = duration_cast<microseconds>(duration).count();
+    auto now = boost::posix_time::microsec_clock::universal_time();
+    return now + boost::posix_time::microseconds(usec);
+}
+
+} // end namespace raft
 
 #endif /* RAFT_SHM_H */

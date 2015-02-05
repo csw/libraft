@@ -159,7 +159,8 @@ raft_future raft_remove_peer(const char *host, uint16_t port);
 // TODO: barrier, snapshot, administrative commands, etc.
 
 RaftError raft_future_wait(raft_future f);
-//int raft_future_wait_for(raft_future f, uint64_t wait_ms);
+bool      raft_future_poll(raft_future f);
+bool      raft_future_wait_for(raft_future f, uint64_t wait_ms);
 RaftError raft_future_get_ptr(raft_future f, void** value_ptr);
 uint64_t  raft_future_get_value(raft_future f);
 
