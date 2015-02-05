@@ -186,7 +186,8 @@ void run_simple_op()
     raft_future_dispose(f);
 }
 
-//const static time_t RECENT = 1423090205;
+//const static time_t RECENT = 1423090205;]
+char scratch[1024];
 
 TEST_F(RaftFixture, Simple) {
     start();
@@ -229,11 +230,44 @@ TEST_F(RaftFixture, Simple) {
     EXPECT_EQ(1, fsm.snapshots);
     raft_future_dispose(f);
 
-    EXPECT_EQ(raft::stats->buffer_alloc, raft::stats->buffer_free);
-    EXPECT_EQ(raft::stats->call_alloc, raft::stats->call_free);
+    f = raft_stats();
+    err = raft_future_wait(f);
+    EXPECT_EQ(RAFT_SUCCESS, err);
+    if (!err) {
+        // test const and non-const
+        const char *stats = nullptr;
+        raft_future_get_stats(f, &stats);
+        bool ok = strstr(stats, "\"fsm_pending\"") != nullptr;
+        EXPECT_TRUE(ok);
+        free_raft_buffer(stats);
+    }
+    raft_future_dispose(f);
+
+    // temporarily broken, need to share stats
+    //EXPECT_EQ(raft::stats->buffer_alloc, raft::stats->buffer_free);
+    //EXPECT_EQ(raft::stats->call_alloc, raft::stats->call_free);
 }
 
-TEST_F(RaftFixture, DoubleWait) {
+TEST_F(RaftFixture, FutureMisuse) {
+    start();
+    wait_until_leader();
+
+    char* buf = alloc_raft_buffer(256);
+    strncpy(buf, "Raft test suite op my spoon is too big", 256);
+    raft_future f = raft_apply(buf, 256, 0);
+    RaftError err = raft_future_wait(f);
+    ASSERT_EQ(RAFT_SUCCESS, err);
+
+    EXPECT_EQ(RAFT_E_INVALID_OP,
+              raft_future_get_stats(f, (const char **)&scratch));
+    EXPECT_EQ(RAFT_E_INVALID_ADDRESS,
+              raft_future_get_fsm_reply(f, nullptr));
+
+    free_raft_buffer(buf);
+    raft_future_dispose(f);
+}
+
+TEST_F(RaftFixture, WaitMisuse) {
     start();
     wait_until_leader();
 
@@ -245,6 +279,9 @@ TEST_F(RaftFixture, DoubleWait) {
     ASSERT_EQ(RAFT_SUCCESS, raft_future_wait(f));
     free_raft_buffer(buf);
     raft_future_dispose(f);
+
+    EXPECT_EQ(RAFT_E_INVALID_OP, raft_future_wait(nullptr));
+    EXPECT_EQ(RAFT_E_INVALID_OP, raft_future_wait((raft_future) &scratch));
 }
 
 TEST_F(RaftFixture, NoCluster) {

@@ -234,7 +234,7 @@ void send_command(char* buf)
     RaftError err = raft_future_wait(f);
     if (!err) {
         fsm_result_t cur_count_p = NULL;
-        raft_future_get_ptr(f, (void**)&cur_count_p);
+        raft_future_get_fsm_reply(f, (void**)&cur_count_p);
         assert(cur_count_p);
         printf("FSM state: letter count %u.\n", *cur_count_p);
         free(cur_count_p);

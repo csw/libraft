@@ -134,14 +134,16 @@ raft_future raft_add_peer(const char *host, uint16_t port);
 
 raft_future raft_remove_peer(const char *host, uint16_t port);
 
+raft_future raft_stats();
+
 raft_future raft_shutdown();
 
 
 RaftError raft_future_wait(raft_future f);
 bool      raft_future_poll(raft_future f);
 bool      raft_future_wait_for(raft_future f, uint64_t wait_ms);
-RaftError raft_future_get_ptr(raft_future f, void** value_ptr);
-uint64_t  raft_future_get_value(raft_future f);
+RaftError raft_future_get_fsm_reply(raft_future f, void** value_ptr);
+RaftError raft_future_get_stats(raft_future f, const char** value_ptr);
 
 /**
  * Dispose of resources held by a raft_future.

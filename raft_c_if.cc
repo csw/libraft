@@ -60,7 +60,13 @@ std::thread               snapshot_worker;
 void run_snapshot_worker();
 void run_snapshot_job(const SnapshotJob& job);
 
-RaftError raft_future_get(raft_future f, uint64_t* res);
+CallTag   future_tag(const raft_future f);
+CallState future_state(const raft_future f);
+RaftError future_get(raft_future f, uint64_t* res);
+// must be terminal already
+uint64_t  future_get_f(raft_future f);
+// as above, but calls dispose()
+RaftError future_eat(raft_future f, uint64_t* res);
 
 }
 
@@ -169,7 +175,7 @@ RaftError raft_apply_sync(char* cmd, size_t cmd_len, uint64_t timeout_ns, void *
     raft_future f = raft_apply(cmd, cmd_len, timeout_ns);
     raft_future_wait(f);
     zlog_debug(msg_cat, "Result of call %p is ready.", f);
-    RaftError err = raft_future_get_ptr(f, res);
+    RaftError err = raft_future_get_fsm_reply(f, res);
     raft_future_dispose(f);
     return err;
 }
@@ -190,7 +196,7 @@ RaftState raft_state()
     RaftError err = raft_future_wait(f);
     RaftState state;
     if (!err) {
-        state = (RaftState) raft_future_get_value(f);
+        state = (RaftState) future_get_f(f);
     } else {
         state = RAFT_INVALID_STATE;
     }
@@ -204,7 +210,7 @@ time_t raft_last_contact()
     RaftError err = raft_future_wait(f);
     time_t last_contact;
     if (!err) {
-        last_contact = (time_t) raft_future_get_value(f);
+        last_contact = (time_t) future_get_f(f);
     } else {
         last_contact = 0;
     }
@@ -216,7 +222,7 @@ RaftIndex raft_last_index()
 {
     raft_future f = send_api_request<api::LastIndex>();
     uint64_t idx;
-    RaftError err = raft_future_get(f, &idx);
+    RaftError err = future_eat(f, &idx);
     if (!err) {
         return idx;
     } else {
@@ -233,7 +239,7 @@ RaftError raft_leader(char** res)
 
     raft_future f = send_api_request<api::GetLeader>();
     uint64_t pval;
-    RaftError err = raft_future_get(f, &pval);
+    RaftError err = future_eat(f, &pval);
     if (!err) {
         assert(pval);
         *res = (char*) raft::shm.get_address_from_handle((shm_handle) pval);
@@ -256,6 +262,11 @@ raft_future raft_remove_peer(const char *host, uint16_t port)
     return (raft_future) send_api_request<api::RemovePeer>(host, port);
 }
 
+raft_future raft_stats()
+{
+    return (raft_future) send_api_request<api::Stats>();
+}
+
 raft_future raft_shutdown()
 {
     raft::scoreboard->shutdown_requested = true;
@@ -264,6 +275,9 @@ raft_future raft_shutdown()
 
 RaftError raft_future_wait(raft_future f)
 {
+    if (f == nullptr || ! raft::in_shm_bounds(f))
+        return RAFT_E_INVALID_OP;
+
     auto* slot = (BaseSlot*) f;
     slot->wait();
     slot->timings.print();
@@ -280,26 +294,71 @@ bool raft_future_wait_for(raft_future f, uint64_t wait_ms)
     return ((BaseSlot*) f)->wait_for(std::chrono::milliseconds(wait_ms));
 }
 
-uint64_t  raft_future_get_value(raft_future f)
+RaftError raft_future_get_fsm_reply(raft_future f, void** value_ptr)
 {
-    return ((BaseSlot*)f)->value();
+    if (future_tag(f) != raft::api::Apply::tag)
+        return RAFT_E_INVALID_OP;
+    return ((BaseSlot*)f)->get_ptr(value_ptr);
 }
 
-RaftError raft_future_get_ptr(raft_future f, void** value_ptr)
+RaftError raft_future_get_stats(raft_future f, const char** res)
 {
-    return ((BaseSlot*)f)->get_ptr(value_ptr);
+    if (future_tag(f) != raft::api::Stats::tag)
+        return RAFT_E_INVALID_OP;
+    if (!res)
+        return RAFT_E_INVALID_ADDRESS;
+
+    uint64_t handle;
+    RaftError err = future_get(f, &handle);
+    if (!err) {
+        assert(handle);
+        *res = (char*) raft::shm.get_address_from_handle((shm_handle) handle);
+    }
+    return err;
 }
 
 namespace {
 
-RaftError raft_future_get(raft_future f, uint64_t* res)
+CallTag future_tag(const raft_future f)
 {
-    assert(res);
-    RaftError err = raft_future_wait(f);
-    auto slot = ((BaseSlot*)f);
+    assert(f);
+    return ((BaseSlot*)f)->tag;
+}
+
+CallState future_state(const raft_future f)
+{
+    assert(f);
+    // XXX: use an atomic
+    return ((BaseSlot*)f)->state;
+}
+
+RaftError future_get(raft_future f, uint64_t* res)
+{
+    if (!f)
+        return RAFT_E_INVALID_OP;
+    if (!res)
+        return RAFT_E_INVALID_ADDRESS;
+
+    RaftError err = RAFT_SUCCESS;
+    if (! is_terminal(future_state(f)))
+        err = raft_future_wait(f);
+
     if (!err) {
-        *res = slot->value();
+        *res = ((BaseSlot*)f)->value();
     }
+    return err;
+}
+
+uint64_t future_get_f(raft_future f)
+{
+    assert(f);
+    assert(is_terminal(future_state(f)));
+    return ((BaseSlot*)f)->value();
+}
+
+RaftError future_eat(raft_future f, uint64_t* res)
+{
+    RaftError err = future_get(f, res);
     raft_future_dispose(f);
     return err;
 }

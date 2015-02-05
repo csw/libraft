@@ -59,7 +59,7 @@ extern Scoreboard*         scoreboard;
 enum class CallTag : uint8_t {
     Invalid, Apply, Barrier, VerifyLeader,
         GetState, LastContact, LastIndex, GetLeader,
-        AddPeer, RemovePeer, SetPeers, Shutdown, Snapshot, 
+        AddPeer, RemovePeer, SetPeers, Shutdown, Snapshot, Stats,
         FSMApply=100, FSMSnapshot, FSMRestore
 };
 
@@ -197,7 +197,7 @@ public:
     virtual void dispose() = 0;
 
     virtual RaftError get_ptr(void **res) = 0;
-    virtual uint64_t value() = 0;
+    virtual uint64_t value() const = 0;
 };
 
 template <typename Call>
@@ -235,7 +235,7 @@ public:
         }
     }
 
-    uint64_t value()
+    uint64_t value() const
     {
         // XXX: maybe don't assert here outside of testing?
         assert(Call::has_ret);
