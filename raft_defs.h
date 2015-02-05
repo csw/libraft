@@ -12,6 +12,8 @@ typedef struct {
     char     shm_path[256];
     uint64_t shm_size;
     char     base_dir[256];
+    uint32_t api_workers;
+
     uint16_t listen_port;
     char     peers[256];
 

@@ -34,6 +34,7 @@ RaftConfig default_config()
     strncpy(cfg.shm_path, SHM_PATH, 255);
     cfg.shm_size = SHM_SIZE;
     cfg.base_dir[0] = '\0';
+    cfg.api_workers = 4;
     cfg.peers[0] = '\0';
     cfg.listen_port = 9001;
 
