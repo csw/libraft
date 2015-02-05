@@ -1,7 +1,7 @@
 makefile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
 make_dir := $(dir $(makefile_path))
 
-sources = $(wildcard *.cc)
+sources = raft_shm.cc raft_c_if.cc stats.cc config.cc
 objs := $(patsubst %.cc,%.o,$(sources))
 
 test_sources = test.cc $(wildcard *_test.cc)
@@ -94,7 +94,9 @@ go-deps:
 # ensure the submodules get checked out
 $(objs): $(zlog_dir)
 
-libraft.a: libraft.a(raft_shm.o) libraft.a(raft_c_if.o) libraft.a(stats.o)
+lib_objs := $(patsubst %,libraft.a(%),$(objs))
+
+libraft.a: $(lib_objs)
 	ranlib $@
 
 raft_client: raft_client.o libraft.a $(zlog_lib)

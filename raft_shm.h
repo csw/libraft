@@ -24,6 +24,7 @@
 #include "zlog/src/zlog.h"
 
 #include "queue.h"
+#include "config.h"
 #include "raft_defs.h"
 #include "raft_c_if.h"
 #include "stats.h"
@@ -44,21 +45,6 @@ class Scoreboard;
 
 const static char SHM_PATH[] = "/tmp/raft_shm";
 const static size_t SHM_SIZE = 64 * 1024 * 1024;
-
-namespace arg {
-
-enum Getopt {
-    ShmPath=0xb0000, ShmSize, Dir, Port, Single, Peers,
-    END_OPTS
-};
-
-bool is_valid(int optkey);
-
-extern const struct option LONG_OPTS[];
-
-int apply(RaftConfig& config, Getopt option, const char *arg);
-
-}
 
 extern zlog_category_t*    msg_cat;
 extern zlog_category_t*    fsm_cat;
@@ -371,8 +357,6 @@ typename Call::slot_t* make_error_request(RaftError err, Args... argv)
 void track_orphan(BaseSlot* slot);
 
 // Startup, shutdown, etc.
-
-RaftConfig default_config();
 
 /**
  * Set up shared memory and any resident resources.
