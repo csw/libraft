@@ -9,3 +9,5 @@
 /test_suite
 /.DS_Store
 /.vagrant/
+*.gcno
+*.~*~
