@@ -64,7 +64,7 @@ run_client: raft_client $(GO_PROG)
 	./raft_client --single -n 10
 
 CGO_CPPFLAGS  = -I$(make_dir) $(CPPFLAGS)
-CGO_LDFLAGS  += -L$(make_dir) -lraft
+CGO_LDFLAGS  += $(LDFLAGS) -L$(make_dir) -lraft
 CGO_LDFLAGS  += $(make_dir)/$(zlog_dir)/libzlog.a $(LIBS)
 
 $(GOPATH)/src:
@@ -77,11 +77,12 @@ $(GO_DIR): $(GOPATH)/src
 $(GO_PROG): $(GO_DIR) $(GO_DIR)/raft_if.go $(GO_DIR)/raft_go_if.h \
 		$(GO_DIR)/raft_go_if.cc libraft.a
 	go clean -i $(GO_LIB)
+	LD=$(CXX) \
 	CGO_CPPFLAGS="$(CGO_CPPFLAGS)" \
 	CXXFLAGS="$(CXXFLAGS)" \
 	CGO_CXXFLAGS="$(CXXFLAGS)" \
 	CGO_LDFLAGS="$(CGO_LDFLAGS)" \
-	  go install $(GO_LIB)
+	    go install -ldflags="-extld=$(CXX)" $(GO) $(GO_LIB)
 
 go: $(GO_PROG)
 
