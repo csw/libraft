@@ -291,8 +291,6 @@ public:
     std::atomic<bool> shutdown_requested;
     std::atomic<bool> raft_killed;
 
-    RaftConfig        config;
-
     bool              msg_timing;
     
     // TODO: look at using boost::interprocess::message_queue
