@@ -356,8 +356,8 @@ static void fsm_worker_step(RaftFSM* fsm)
     BaseSlot::pointer slot = rec.second;
     raft::mutex_lock l(slot->owned);
     slot->timings.record("FSM call received");
-    zlog_debug(msg_cat, "FSM call received, tag %d, call %p.",
-               tag, rec.second.get());
+    zlog_debug(msg_cat, "FSM call received, tag %s, call %p.",
+               tag_name(tag), rec.second.get());
     assert(slot->state == raft::CallState::Pending);
 
     switch (tag) {
@@ -373,7 +373,7 @@ static void fsm_worker_step(RaftFSM* fsm)
         dispatch_fsm_restore((api::FSMRestore::slot_t&) *slot, fsm);
         break;
     default:
-        zlog_fatal(msg_cat, "Unhandled call type: %d", tag);
+        zlog_fatal(msg_cat, "Unhandled call type: %s", tag_name(tag));
         abort();
     }
 }

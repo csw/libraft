@@ -26,6 +26,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <vector>
 
 #include <list>
 #include <string>
@@ -68,6 +69,9 @@ void report_process_status(const char *desc, pid_t pid, int status);
 void init_client_allocators();
 void init_raft_allocators();
 
+std::vector<std::string> make_tag_names();
+const std::vector<std::string> tag_names = make_tag_names();
+
 }
 
 zlog_category_t*    msg_cat;
@@ -77,6 +81,11 @@ zlog_category_t*    client_cat;
 pid_t               raft_pid;
 managed_mapped_file shm;
 Scoreboard*         scoreboard;
+
+const char* tag_name(CallTag tag)
+{
+    return tag_names.at((size_t) tag).c_str();
+}
 
 bool is_terminal(CallState state)
 {
@@ -463,7 +472,18 @@ void init_raft_allocators()
 #undef api_call
 }
 
+std::vector<std::string> make_tag_names()
+{
+    std::vector<std::string> names(256, "*invalid*");
+#define api_call(name, argT, hasRet)            \
+    names.at((size_t) CallTag::name) = #name;
+#include "raft_api_calls.h"
+#include "raft_fsm_calls.h"
+#undef api_call
+    return names;
 }
+
+} // end anon namespace
 
 Timings::Timings(time_point t)
     : n_entries(0)

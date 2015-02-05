@@ -56,11 +56,14 @@ extern pid_t               raft_pid;
 extern managed_mapped_file shm;
 extern Scoreboard*         scoreboard;
 
-enum class CallTag {
+enum class CallTag : uint8_t {
     Invalid, Apply, Barrier, VerifyLeader,
         GetState, LastContact, LastIndex, GetLeader,
         AddPeer, RemovePeer, SetPeers, Shutdown, Snapshot, 
-        FSMApply=100, FSMSnapshot, FSMRestore };
+        FSMApply=100, FSMSnapshot, FSMRestore
+};
+
+const char* tag_name(CallTag tag);
 
 enum class CallState {
     Pending, Dispatched, Success, Error
