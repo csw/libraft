@@ -56,7 +56,7 @@ gtest_lib := $(gtest_dir)/make/gtest_main.a
 
 binaries := raft_client test_suite
 
-.PHONY: all clean libclean test run_client go go-deps
+.PHONY: all clean libclean test run_client go go-deps gtest zlog
 
 all: libraft.a $(binaries) $(GO_PROG) test_suite
 
@@ -118,8 +118,12 @@ $(zlog_dir):
 $(zlog_lib): $(zlog_dir)
 	cd zlog/src && $(MAKE) libzlog.a
 
+zlog: $(zlog_lib)
+
 $(gtest_lib):
 	cd $(gtest_dir)/make && $(MAKE) "CXXFLAGS=$(CXXFLAGS)" gtest_main.a
+
+gtest: $(gtest_lib)
 
 clean:
 	-rm -rf *.o *.d *.a *.dSYM $(binaries)
