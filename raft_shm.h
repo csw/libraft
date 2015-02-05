@@ -28,7 +28,7 @@
 #include "queue.h"
 #include "config.h"
 #include "raft_defs.h"
-#include "raft_c_if.h"
+#include "raft_if.h"
 #include "stats.h"
 
 namespace raft {

@@ -18,7 +18,7 @@
 
 #include "zlog/src/zlog.h"
 
-#include "raft_c_if.h"
+#include "raft_if.h"
 
 typedef uint32_t* fsm_result_t;
 
@@ -230,7 +230,7 @@ void run_interactive()
 
 void send_command(char* buf)
 {
-    raft_future f = raft_apply_async(buf, BUFSIZE, 0);
+    raft_future f = raft_apply(buf, BUFSIZE, 0);
     RaftError err = raft_future_wait(f);
     if (!err) {
         fsm_result_t cur_count_p = NULL;

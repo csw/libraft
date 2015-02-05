@@ -17,7 +17,7 @@
 #include "gtest/gtest.h"
 
 #include "raft_shm.h"
-#include "raft_c_if.h"
+#include "raft_if.h"
 #include "stats.h"
 
 using std::string;
@@ -179,7 +179,7 @@ void run_simple_op()
 {
     char* buf = alloc_raft_buffer(256);
     strncpy(buf, "Raft test suite op my spoon is too big", 256);
-    raft_future f = raft_apply_async(buf, 256, 0);
+    raft_future f = raft_apply(buf, 256, 0);
     RaftError err = raft_future_wait(f);
     ASSERT_EQ(RAFT_SUCCESS, err);
     free_raft_buffer(buf);
@@ -239,7 +239,7 @@ TEST_F(RaftFixture, DoubleWait) {
 
     char* buf = alloc_raft_buffer(256);
     strncpy(buf, "Raft test suite op my spoon is too big", 256);
-    raft_future f = raft_apply_async(buf, 256, 0);
+    raft_future f = raft_apply(buf, 256, 0);
     RaftError err = raft_future_wait(f);
     ASSERT_EQ(RAFT_SUCCESS, err);
     ASSERT_EQ(RAFT_SUCCESS, raft_future_wait(f));
@@ -263,8 +263,8 @@ TEST_F(RaftFixture, OnClose) {
     strncpy(buf, "oops", 255);
     raft::scoreboard->api_queue.close();
 
-    EXPECT_EQ(RAFT_E_IN_SHUTDOWN, raft_apply(buf, 256, 0, &ptr));
-    f = raft_apply_async(buf, 256, 0);
+    EXPECT_EQ(RAFT_E_IN_SHUTDOWN, raft_apply_sync(buf, 256, 0, &ptr));
+    f = raft_apply(buf, 256, 0);
     EXPECT_EQ(RAFT_E_IN_SHUTDOWN, raft_future_wait(f));
     f = raft_barrier(0);
     EXPECT_EQ(RAFT_E_IN_SHUTDOWN, raft_future_wait(f));
@@ -350,23 +350,23 @@ TEST_F(RaftFixture, BadApply) {
     strncpy(buf,    "hello", 255);
     strncpy(badbuf, "hello", 255);
 
-    f = raft_apply_async(badbuf, 256, 0);
+    f = raft_apply(badbuf, 256, 0);
     EXPECT_EQ(RAFT_E_INVALID_ADDRESS, raft_future_wait(f));
     raft_future_dispose(f);
 
-    f = raft_apply_async(nullptr, 256, 0);
+    f = raft_apply(nullptr, 256, 0);
     EXPECT_EQ(RAFT_E_INVALID_ADDRESS, raft_future_wait(f));
     raft_future_dispose(f);
 
-    err = raft_apply(badbuf, 256, 0, &result);
+    err = raft_apply_sync(badbuf, 256, 0, &result);
     EXPECT_EQ(RAFT_E_INVALID_ADDRESS, err);
     EXPECT_EQ(nullptr, result);
 
-    err = raft_apply(nullptr, 256, 0, &result);
+    err = raft_apply_sync(nullptr, 256, 0, &result);
     EXPECT_EQ(RAFT_E_INVALID_ADDRESS, err);
     EXPECT_EQ(nullptr, result);
 
-    err = raft_apply(buf, 256, 0, nullptr);
+    err = raft_apply_sync(buf, 256, 0, nullptr);
     EXPECT_EQ(RAFT_E_INVALID_ADDRESS, err);
 
     free_raft_buffer(buf);
@@ -379,7 +379,7 @@ TEST_F(RaftFixture, BadApply) {
 TEST_F(RaftFixture, NotLeaderYet) {
     start();
     char* buf = alloc_raft_buffer(256);
-    raft_future f = raft_apply_async(buf, 256, 0);
+    raft_future f = raft_apply(buf, 256, 0);
     RaftError err = raft_future_wait(f);
     ASSERT_NE(RAFT_SUCCESS, err);
 }
@@ -429,12 +429,12 @@ TEST_F(RaftFixture, OrphanCleanup) {
     const int passes = 20;
     for (int i = 0; i < passes; i++) {
         char* buf = alloc_raft_buffer(256);
-        raft_future f = raft_apply_async(buf, 256, 0);
+        raft_future f = raft_apply(buf, 256, 0);
         raft_future_dispose(f);
     }
 
     char* buf = alloc_raft_buffer(256);
-    raft_future f = raft_apply_async(buf, 256, 0);
+    raft_future f = raft_apply(buf, 256, 0);
     EXPECT_EQ(RAFT_SUCCESS, raft_future_wait(f));
     raft_future_dispose(f);
     free_raft_buffer(buf);

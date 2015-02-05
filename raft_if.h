@@ -48,48 +48,29 @@
 extern "C" {
 #endif
 
-// Bottom half; FSM side
-
-typedef void* raft_future;
-typedef void* raft_snapshot_req;
-
-typedef struct raft_fsm {
-    void* (*apply)(uint64_t index, uint64_t term, RaftLogType type,
-                   char *cmd, size_t len);
-    void (*begin_snapshot)(const char *path, raft_snapshot_req s);
-    int (*restore)(const char *path);
-} RaftFSM;
-
-void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success);
-
-// Optional snapshot support
-
-typedef void* raft_fsm_snapshot_handle;
-
-/**
- * Callback function for writing a snapshot from the state handle.
- *
- * Must not close the supplied sink.
+/*
+ * See raft_defs.h for struct definitions.
  */
-typedef int (*raft_fsm_snapshot_func)(raft_fsm_snapshot_handle handle, FILE* sink);
 
-void raft_fsm_take_snapshot(raft_snapshot_req req,
-                            raft_fsm_snapshot_handle h,
-                            raft_fsm_snapshot_func f);
+typedef struct raft_fsm RaftFSM;
+typedef void* raft_future;
 
 // Top half; client side
 
-void raft_default_config(RaftConfig *cfg);
+pid_t raft_init(RaftFSM *fsm, const RaftConfig *cfg);
+void  raft_default_config(RaftConfig *cfg);
+void  raft_cleanup();
+
+// getopt_long support for Raft options
+
 const struct option* raft_getopt_long_opts();
 bool is_raft_option(int optval);
 int raft_apply_option(RaftConfig *cfg, int option, const char* arg);
-pid_t raft_init(RaftFSM *fsm, const RaftConfig *cfg);
-void raft_cleanup();
 
 bool raft_is_leader();
 
 /**
- * Apply a command to the Raft FSM.
+ * Apply a command to the Raft FSM, blocking until it completes.
  *
  * @param cmd Opaque command buffer, allocated with alloc_raft_buffer().
  * @param cmd_len Length of the command (may be smaller than the buffer
@@ -98,10 +79,10 @@ bool raft_is_leader();
  * @param res [out] Location to store result pointer.
  * @retval error Error from Raft; 0 on success.
  */
-RaftError raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns,
+RaftError raft_apply_sync(char* cmd, size_t cmd_len, uint64_t timeout_ns,
                      void **res);
 
-raft_future raft_apply_async(char* cmd, size_t cmd_len, uint64_t timeout_ns);
+raft_future raft_apply(char* cmd, size_t cmd_len, uint64_t timeout_ns);
 
 raft_future raft_barrier(uint64_t timeout_ns);
 
@@ -149,14 +130,12 @@ RaftError   raft_leader(char** buf);
 
 raft_future raft_snapshot();
 
-raft_future raft_shutdown();
-
-
 raft_future raft_add_peer(const char *host, uint16_t port);
 
 raft_future raft_remove_peer(const char *host, uint16_t port);
 
-// TODO: barrier, snapshot, administrative commands, etc.
+raft_future raft_shutdown();
+
 
 RaftError raft_future_wait(raft_future f);
 bool      raft_future_poll(raft_future f);
@@ -168,6 +147,36 @@ uint64_t  raft_future_get_value(raft_future f);
  * Dispose of resources held by a raft_future.
  */
 void raft_future_dispose(raft_future f);
+
+
+// Bottom half; FSM side
+
+typedef void* raft_snapshot_req;
+
+// AKA RaftFSM
+struct raft_fsm {
+    void* (*apply)(uint64_t index, uint64_t term, RaftLogType type,
+                   char *cmd, size_t len);
+    void (*begin_snapshot)(const char *path, raft_snapshot_req s);
+    int (*restore)(const char *path);
+};
+
+void raft_fsm_snapshot_complete(raft_snapshot_req s, bool success);
+
+// Optional snapshot support
+
+typedef void* raft_fsm_snapshot_handle;
+
+/**
+ * Callback function for writing a snapshot from the state handle.
+ *
+ * Must not close the supplied sink.
+ */
+typedef int (*raft_fsm_snapshot_func)(raft_fsm_snapshot_handle handle, FILE* sink);
+
+void raft_fsm_take_snapshot(raft_snapshot_req req,
+                            raft_fsm_snapshot_handle h,
+                            raft_fsm_snapshot_func f);
 
 char* alloc_raft_buffer(size_t len);
 void free_raft_buffer(const char* buf);
