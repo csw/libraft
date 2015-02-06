@@ -326,7 +326,7 @@ TEST(RaftProcs, KillRaftDeathTest) {
             raft::kill_raft_();
             sleep(5);
         },
-        "exited");
+        "exited abnormally");
 }
 
 TEST(RaftProcs, BadSHMPathDeathTest) {

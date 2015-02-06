@@ -443,8 +443,14 @@ void watch_raft_proc(pid_t raft_pid)
 void report_process_status(const char *desc, pid_t pid, int status)
 {
     if (WIFEXITED(status)) {
-        fprintf(stderr, "%s (pid %d) exited with status %d.\n",
-                desc, pid, WEXITSTATUS(status));
+        const int exitstatus = WEXITSTATUS(status);
+        if (exitstatus == 0) {
+            fprintf(stderr, "%s (pid %d) exited normally.\n",
+                    desc, pid);
+        } else {
+            fprintf(stderr, "%s (pid %d) exited abnormally with status %d.\n",
+                    desc, pid, exitstatus);
+        }
     } else if (WIFSIGNALED(status)) {
         fprintf(stderr, "%s (pid %d) terminated by signal %d.\n",
                 desc, pid, WTERMSIG(status));
