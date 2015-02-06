@@ -25,12 +25,14 @@
 #include <chrono>
 #include <deque>
 #include <memory>
+#include <string>
 #include <thread>
 #include <vector>
 
 #include "raft_if.h"
 #include "raft_shm.h"
 #include "stats.h"
+#include "zserge-jsmn/jsmn.h"
 
 using boost::interprocess::anonymous_instance;
 using boost::interprocess::interprocess_mutex;
@@ -555,6 +557,42 @@ void free_raft_buffer(const char* buf)
 {
     stats->buffer_free.inc();
     raft::shm.deallocate((void*) buf);
+}
+
+void raft_print_stats(const char *stats)
+{
+    if (!stats) {
+        zlog_error(client_cat, "Invalid stats pointer %p", stats);
+        return;
+    }
+
+    jsmn_parser p;
+    jsmntok_t tokens[64];
+    jsmn_init(&p);
+    int parsed;
+    parsed = jsmn_parse(&p, stats, strlen(stats),
+                        tokens, sizeof(tokens)/sizeof(tokens[0]));
+    if (parsed < 1) {
+        zlog_error(client_cat, "JSON parsing error: type %d", parsed);
+        return;
+    } else if (tokens[0].type != JSMN_OBJECT) {
+        zlog_error(client_cat, "Invalid stats data");
+        return;
+    }
+
+    fprintf(stderr, "Raft stats:\n");
+
+    const int key_start = 1;
+    for (int key = 0; key < tokens[0].size; ++key) {
+        int key_i = key_start + 2*key;
+        const jsmntok_t& key_t = tokens[key_i];
+        const jsmntok_t& val_t = tokens[key_i+1];
+        assert(key_t.type == JSMN_STRING);
+        assert(val_t.type == JSMN_STRING);
+        const std::string key_s(&stats[key_t.start], key_t.end - key_t.start);
+        const std::string val_s(&stats[val_t.start], val_t.end - val_t.start);
+        fprintf(stderr, "    %20s: %s\n", key_s.c_str(), val_s.c_str());
+    }
 }
 
 void init_err_msgs()

@@ -173,8 +173,21 @@ int main(int argc, char *argv[])
         run_auto();
     }
 
-    raft_future sf = raft_shutdown();
-    raft_future_wait(sf);
+    raft_future sf = raft_stats();
+    const char *stats;
+    RaftError err = raft_future_get_stats(sf, &stats);
+    if (err) {
+        zlog_error(cat, "Error fetching stats: %s\n", raft_err_msg(err));
+        return 1;
+    }
+    raft_print_stats(stats);
+
+    sf = raft_shutdown();
+    err = raft_future_wait(sf);
+    if (err) {
+        zlog_error(cat, "Error in shutdown: %s\n", raft_err_msg(err));
+        return 1;
+    }
     printf("Raft is shut down.\n");
     raft_cleanup();
 

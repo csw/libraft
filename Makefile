@@ -38,7 +38,7 @@ PATH := $(PATH):$(GO_BIN)
 
 export GOPATH PATH
 
-CPPFLAGS += -isystem $(make_dir)/deps
+CPPFLAGS += -isystem $(make_dir)/header_deps
 
 CXXFLAGS += -std=c++11
 CXXFLAGS += -Wall -Werror #-pedantic
@@ -48,15 +48,20 @@ CXXFLAGS += -g -MMD
 CFLAGS += -Wall -Werror -pedantic -std=c99
 CFLAGS += -g -MMD
 
-zlog_dir := zlog/src
-zlog_lib := zlog/src/libzlog.a
+zlog_dir := $(make_dir)/zlog/src
+zlog_lib := $(zlog_dir)/libzlog.a
 
 gtest_dir := googletest
 gtest_lib := $(gtest_dir)/make/gtest_main.a
 
+jsmn_dir := $(make_dir)/zserge-jsmn
+jsmn_lib := $(jsmn_dir)/libjsmn.a
+
+local_libs := $(zlog_lib) $(jsmn_lib)
+
 binaries := raft_client test_suite
 
-.PHONY: all clean libclean test run_client go go-deps gtest zlog
+.PHONY: all clean libclean test run_client deps go go-deps gtest zlog jsmn
 
 all: libraft.a $(binaries) $(GO_PROG) test_suite
 
@@ -65,7 +70,7 @@ run_client: raft_client $(GO_PROG)
 
 CGO_CPPFLAGS  = -I$(make_dir) $(CPPFLAGS)
 CGO_LDFLAGS  += $(LDFLAGS) -L$(make_dir) -lraft
-CGO_LDFLAGS  += $(make_dir)/$(zlog_dir)/libzlog.a $(LIBS)
+CGO_LDFLAGS  += $(LIBS) $(local_libs)
 
 $(GOPATH)/src:
 	@echo "Go source directory not found for GOPATH=$(GOPATH)!" >&2
@@ -75,7 +80,7 @@ $(GO_DIR): $(GOPATH)/src
 	go get -d $(GO_LIB)
 
 $(GO_PROG): $(GO_DIR) $(GO_DIR)/raft_if.go $(GO_DIR)/raft_go_if.h \
-		$(GO_DIR)/raft_go_if.cc libraft.a
+		$(GO_DIR)/raft_go_if.cc libraft.a $(local_libs)
 	go clean -i $(GO_LIB)
 	LD=$(CXX) \
 	CGO_CPPFLAGS="$(CGO_CPPFLAGS)" \
@@ -99,12 +104,12 @@ lib_objs := $(patsubst %,libraft.a(%),$(objs))
 libraft.a: $(lib_objs)
 	ranlib $@
 
-raft_client: raft_client.o libraft.a $(zlog_lib)
+raft_client: raft_client.o libraft.a $(local_libs)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 $(test_objs) : CPPFLAGS := $(CPPFLAGS) -I$(gtest_dir)/include
 
-test_suite: $(test_objs) libraft.a $(gtest_lib) $(zlog_lib)
+test_suite: $(test_objs) libraft.a $(gtest_lib) $(local_libs)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 test: test_suite $(GO_PROG)
@@ -124,6 +129,13 @@ $(gtest_lib):
 	cd $(gtest_dir)/make && $(MAKE) "CXXFLAGS=$(CXXFLAGS)" gtest_main.a
 
 gtest: $(gtest_lib)
+
+$(jsmn_lib):
+	cd $(jsmn_dir) && $(MAKE)
+
+jsmn: $(jsmn_lib)
+
+deps: $(zlog_lib) $(gtest_lib) $(jsmn_lib)
 
 clean:
 	-rm -rf *.o *.d *.a *.dSYM $(binaries)

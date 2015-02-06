@@ -145,6 +145,8 @@ bool      raft_future_wait_for(raft_future f, uint64_t wait_ms);
 RaftError raft_future_get_fsm_reply(raft_future f, void** value_ptr);
 RaftError raft_future_get_stats(raft_future f, const char** value_ptr);
 
+void raft_print_stats(const char *stats);
+
 /**
  * Dispose of resources held by a raft_future.
  */
