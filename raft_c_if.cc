@@ -587,8 +587,11 @@ void raft_print_stats(const char *stats)
         int key_i = key_start + 2*key;
         const jsmntok_t& key_t = tokens[key_i];
         const jsmntok_t& val_t = tokens[key_i+1];
-        assert(key_t.type == JSMN_STRING);
-        assert(val_t.type == JSMN_STRING);
+        if (key_t.type != JSMN_STRING || val_t.type != JSMN_STRING) {
+            zlog_error(client_cat, "Unexpected JSON content near character %d:\n%s",
+                       key_t.start, stats);
+            return;
+        }
         const std::string key_s(&stats[key_t.start], key_t.end - key_t.start);
         const std::string val_s(&stats[val_t.start], val_t.end - val_t.start);
         fprintf(stderr, "    %20s: %s\n", key_s.c_str(), val_s.c_str());
