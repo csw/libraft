@@ -3,7 +3,6 @@
 #define STATS_H
 
 #include <atomic>
-#include <memory>
 #include <cstdint>
 
 namespace raft {
@@ -31,12 +30,8 @@ public:
     Counter call_free;
 };
 
-extern std::unique_ptr<Stats> stats;
-
-void init_stats();
+extern Stats* stats;
 
 }
-
-#undef CDEF
 
 #endif /* STATS_H */

@@ -549,14 +549,12 @@ void run_snapshot_job(const SnapshotJob& job)
 
 char* alloc_raft_buffer(size_t len)
 {
-    stats->buffer_alloc.inc();
-    return (char*) shm.allocate(len);
+    return raft::allocate_buf(len);
 }
 
 void free_raft_buffer(const char* buf)
 {
-    stats->buffer_free.inc();
-    raft::shm.deallocate((void*) buf);
+    raft::free_buf(buf);
 }
 
 void raft_print_stats(const char *stats)

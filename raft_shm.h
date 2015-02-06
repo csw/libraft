@@ -76,6 +76,9 @@ enum class ClientState {
 bool is_terminal(CallState state);
 bool in_shm_bounds(const void* ptr);
 
+char* allocate_buf(size_t len);
+void  free_buf(const char *buf);
+
 template<typename CT> class SlotHandle;
 
 // call structs

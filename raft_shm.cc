@@ -154,6 +154,21 @@ bool in_shm_bounds(const void* ptr)
     return (cptr >= base) && (cptr < base + shm.get_size());
 }
 
+char* allocate_buf(size_t len)
+{
+    char *buf = (char*) shm.allocate(len);
+    stats->buffer_alloc.inc();
+    zlog_debug(shm_cat, "Allocated buffer: %p (%zu bytes)", buf, len);
+    return buf;
+}
+
+void free_buf(const char *buf)
+{
+    stats->buffer_free.inc();
+    zlog_debug(shm_cat, "Freeing buffer: %p", buf);
+    shm.deallocate((void*) buf);
+}
+
 void track_orphan(BaseSlot* slot)
 {
     zlog_debug(msg_cat, "Enqueueing orphaned call: %p", slot);
@@ -230,7 +245,6 @@ bool try_dispose_orphan(BaseSlot* orphan)
 
 void shm_init(const char* path, bool create, const RaftConfig* config)
 {
-    init_stats();
     if (log_init(config) != 0) {
         fprintf(stderr, "zlog init failed\n");
     }
@@ -263,6 +277,7 @@ void shm_init(const char* path, bool create, const RaftConfig* config)
         RaftConfig* shared_config = shm.construct<RaftConfig>(unique_instance)();
         *shared_config = *config;
         strncpy(shared_config->shm_path, path, 255);
+        stats = shm.construct<Stats>(unique_instance)();
         const char* timing_e = getenv("RAFT_TIMING");
         scoreboard->msg_timing = (timing_e && *timing_e);
         init_client_allocators();
@@ -289,6 +304,7 @@ void shm_init(const char* path, bool create, const RaftConfig* config)
         auto ret = shm.find<Scoreboard>(unique_instance);
         scoreboard = ret.first;
         assert(scoreboard);
+        stats = shm.find<Stats>(unique_instance).first;
         init_raft_allocators();
         zlog_debug(shm_cat, "Found scoreboard.");
     }

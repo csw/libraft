@@ -196,8 +196,10 @@ TEST_F(RaftFixture, Simple) {
     char *leader = nullptr;
     RaftError err = raft_leader(&leader);
     EXPECT_EQ(RAFT_SUCCESS, err);
-    if (leader)
+    if (leader) {
         EXPECT_STREQ("127.0.0.1:9001", leader);
+        free_raft_buffer(leader);
+    }
 
     // XXX: getting 3 seconds past the epoch... :p
     EXPECT_LT(raft_last_contact(), 86400);
@@ -244,8 +246,8 @@ TEST_F(RaftFixture, Simple) {
     raft_future_dispose(f);
 
     // temporarily broken, need to share stats
-    //EXPECT_EQ(raft::stats->buffer_alloc, raft::stats->buffer_free);
-    //EXPECT_EQ(raft::stats->call_alloc, raft::stats->call_free);
+    EXPECT_EQ(raft::stats->buffer_alloc, raft::stats->buffer_free);
+    EXPECT_EQ(raft::stats->call_alloc, raft::stats->call_free);
 }
 
 TEST_F(RaftFixture, FutureMisuse) {
