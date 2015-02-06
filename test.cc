@@ -340,6 +340,15 @@ TEST(RaftProcs, BadSHMPathDeathTest) {
         "shared memory");
 }
 
+TEST(RaftProcs, InvalidConfigDeathTest) {
+    ASSERT_DEATH({
+            RaftFixtureBase f;
+            f.config.HeartbeatTimeout = 5;
+            f.start();
+        },
+        "Invalid Raft configuration");
+}
+
 TEST_F(RaftFixture, Restore) {
     char raft_dir[256];
     const char* tmpdir = getenv("TMPDIR");
