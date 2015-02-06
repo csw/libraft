@@ -22,6 +22,7 @@
 #include <atomic>
 #include <cinttypes>
 #include <cstdio>
+#include <cstdlib>
 #include <getopt.h>
 #include <signal.h>
 #include <unistd.h>
@@ -66,6 +67,7 @@ void run_orphan_gc();
 void scan_orphans(std::list<BaseSlot*>& calls);
 bool try_dispose_orphan(BaseSlot* orphan);
 void report_process_status(const char *desc, pid_t pid, int status);
+int  log_init(const RaftConfig* cfg);
 void init_client_allocators();
 void init_raft_allocators();
 
@@ -229,12 +231,9 @@ bool try_dispose_orphan(BaseSlot* orphan)
 void shm_init(const char* path, bool create, const RaftConfig* config)
 {
     init_stats();
-    if (zlog_init("zlog.conf")) {
+    if (log_init(config) != 0) {
         fprintf(stderr, "zlog init failed\n");
     }
-    msg_cat = zlog_get_category("raft_msg");
-    fsm_cat = zlog_get_category("raft_fsm");
-    shm_cat = zlog_get_category("raft_shm");
 
     // register on-exit callback to call remove()?
     if (create) {
@@ -280,6 +279,11 @@ void shm_init(const char* path, bool create, const RaftConfig* config)
         if (unlink(path) == -1) {
             perror("Failed to unlink shared memory file");
             exit(1);
+        }
+
+        auto shm_config = shm.find<RaftConfig>(unique_instance).first;
+        if (log_init(shm_config) != 0) {
+            fprintf(stderr, "zlog init failed\n");
         }
 
         auto ret = shm.find<Scoreboard>(unique_instance);
@@ -460,6 +464,28 @@ void report_process_status(const char *desc, pid_t pid, int status)
     } else {
         assert(false && "impossible process status!");
     }
+}
+
+int log_init(const RaftConfig* cfg)
+{
+    char* v_env = getenv("VERBOSE");
+    bool run_verbose = ((v_env && *v_env) || (cfg && cfg->verbose));
+    const char *config_file = run_verbose ? "zlog_verbose.conf" : "zlog.conf";
+    //fprintf(stderr, "Loading zlog config: %s\n", config_file);
+    int rc;
+    if (!msg_cat) {
+        rc = zlog_init(config_file);
+    } else {
+        rc = zlog_reload(config_file);
+    }
+    if (rc)
+        return rc;
+
+    msg_cat = zlog_get_category("raft_msg");
+    fsm_cat = zlog_get_category("raft_fsm");
+    shm_cat = zlog_get_category("raft_shm");
+    
+    return 0;
 }
 
 void init_client_allocators()

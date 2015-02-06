@@ -11,7 +11,7 @@ namespace raft {
 namespace arg {
 
 enum Getopt {
-    ShmPath=0xb0000, ShmSize, Dir, Port, Single, Peers,
+    ShmPath=0xb0000, ShmSize, Dir, Port, Single, Peers, Verbose,
     END_OPTS
 };
 

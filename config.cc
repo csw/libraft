@@ -13,6 +13,7 @@ const struct option arg::LONG_OPTS[] = {
     { "port",     required_argument, NULL, arg::Port },
     { "single",   no_argument,       NULL, arg::Single },
     { "peers",    required_argument, NULL, arg::Peers },
+    { "verbose",  no_argument,       NULL, arg::Verbose },
     { "",         0,                 NULL, 0   }
 };
 
@@ -35,6 +36,8 @@ RaftConfig default_config()
     cfg.shm_size = SHM_SIZE;
     cfg.base_dir[0] = '\0';
     cfg.api_workers = 4;
+    cfg.verbose = false;
+
     cfg.peers[0] = '\0';
     cfg.listen_port = 9001;
 
@@ -87,6 +90,9 @@ int arg::apply(RaftConfig& cfg, Getopt option, const char *arg)
     case arg::Peers:
         assert(arg);
         strncpy(cfg.peers, arg, 255);
+        break;
+    case arg::Verbose:
+        cfg.verbose = true;
         break;
     default:
         assert(false && "unhandled config flag");
