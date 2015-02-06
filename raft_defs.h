@@ -11,6 +11,7 @@ extern "C" {
 typedef struct {
     char     shm_path[256];
     uint64_t shm_size;
+    char     backend_type[16];
     char     base_dir[256];
     uint32_t api_workers;
     bool     verbose;

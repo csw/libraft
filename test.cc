@@ -168,6 +168,10 @@ public:
 
 class RaftFixture : public ::testing::Test, public RaftFixtureBase {};
 
+class RaftDBFixture : public ::testing::TestWithParam<const char*>,
+                      public RaftFixtureBase
+{};
+
 void wait_until_leader()
 {
     while (! raft_is_leader()) {
@@ -349,7 +353,9 @@ TEST(RaftProcs, InvalidConfigDeathTest) {
         "Invalid Raft configuration");
 }
 
-TEST_F(RaftFixture, Restore) {
+TEST_P(RaftDBFixture, Restore) {
+    int rc = raft::arg::apply(config, raft::arg::Getopt::Backend, GetParam());
+    ASSERT_EQ(0, rc);
     char raft_dir[256];
     const char* tmpdir = getenv("TMPDIR");
     snprintf(raft_dir, 255, "%s/raft_test_XXXXXX",
@@ -384,6 +390,10 @@ TEST_F(RaftFixture, Restore) {
     EXPECT_EQ(ops, fsm.count);
     EXPECT_EQ(1, fsm.restores);
 }
+
+INSTANTIATE_TEST_CASE_P(DBTest,
+                        RaftDBFixture,
+                        ::testing::Values("boltdb", "mdb"));
 
 TEST_F(RaftFixture, BadApply) {
     start();

@@ -7,14 +7,15 @@
 namespace raft {
 
 const struct option arg::LONG_OPTS[] = {
-    { "shm-path", required_argument, NULL, arg::ShmPath },
-    { "shm-size", required_argument, NULL, arg::ShmSize },
-    { "dir",      required_argument, NULL, arg::Dir },
-    { "port",     required_argument, NULL, arg::Port },
-    { "single",   no_argument,       NULL, arg::Single },
-    { "peers",    required_argument, NULL, arg::Peers },
-    { "verbose",  no_argument,       NULL, arg::Verbose },
-    { "",         0,                 NULL, 0   }
+    { "shm-path",      required_argument,  NULL,  arg::ShmPath },
+    { "shm-size",      required_argument,  NULL,  arg::ShmSize },
+    { "backend-type",  required_argument,  NULL,  arg::Backend },
+    { "dir",           required_argument,  NULL,  arg::Dir     },
+    { "port",          required_argument,  NULL,  arg::Port    },
+    { "single",        no_argument,        NULL,  arg::Single  },
+    { "peers",         required_argument,  NULL,  arg::Peers   },
+    { "verbose",       no_argument,        NULL,  arg::Verbose },
+    { "",              0,                  NULL,  0            }
 };
 
 namespace {
@@ -34,6 +35,7 @@ RaftConfig default_config()
     RaftConfig cfg;
     strncpy(cfg.shm_path, SHM_PATH, 255);
     cfg.shm_size = SHM_SIZE;
+    strncpy(cfg.backend_type, "boltdb", 15);
     cfg.base_dir[0] = '\0';
     cfg.api_workers = 4;
     cfg.verbose = false;
@@ -75,6 +77,10 @@ int arg::apply(RaftConfig& cfg, Getopt option, const char *arg)
     case arg::ShmSize:
         assert(arg);
         cfg.shm_size = parse_size(arg);
+        break;
+    case arg::Backend:
+        assert(arg);
+        strncpy(cfg.backend_type, arg, sizeof(cfg.backend_type)-1);
         break;
     case arg::Dir:
         assert(arg);
